@@ -59,3 +59,8 @@ def test_api_uses_postgres_through_psycopg3() -> None:
     # A bare postgresql:// URL makes SQLAlchemy load psycopg2, which is not installed.
     env = load("docker-compose.yml")["services"]["api"]["environment"]
     assert env["SCHEMALAB_DATABASE_URL"].startswith("postgresql+psycopg://")
+
+
+def test_ci_runs_the_web_unit_tests() -> None:
+    steps = load(".github/workflows/ci.yml")["jobs"]["web"]["steps"]
+    assert {"run": "npm test"} in steps
