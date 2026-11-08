@@ -26,3 +26,7 @@ data/generated/
 .DS_Store
 .idea/
 .vscode/
+
+# Sample data (built by python -m schemalab.datasets)
+data/cache/
+data/samples/*.duckdb

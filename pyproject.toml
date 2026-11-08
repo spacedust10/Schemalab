@@ -42,7 +42,8 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+# Tests assert, and build fixture SQL from tmp paths.
+"tests/**" = ["S101", "S608"]
 
 [tool.mypy]
 python_version = "3.12"
