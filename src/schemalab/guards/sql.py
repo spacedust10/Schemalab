@@ -66,7 +66,6 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
 
 def _check_tables(tree: exp.Expression, allowed_tables: Collection[str]) -> None:
     allowed = {t.lower() for t in allowed_tables}
-    cte_names = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
 
     for table in tree.find_all(exp.Table):
         if not isinstance(table.this, exp.Identifier):
@@ -74,5 +73,21 @@ def _check_tables(tree: exp.Expression, allowed_tables: Collection[str]) -> None
         if table.args.get("db") or table.args.get("catalog"):
             raise UnsafeSQLError(f"qualified table names are not allowed: {table.sql('duckdb')}")
         name = table.name.lower()
-        if name not in allowed and name not in cte_names:
+        if name not in allowed and name not in _visible_ctes(table):
             raise UnsafeSQLError(f"unknown table: {table.name}")
+
+
+def _visible_ctes(node: exp.Expression) -> set[str]:
+    """CTE names in scope at `node`: those on the WITH of any enclosing query.
+
+    A CTE defined inside a subquery is not visible outside it, so collecting CTE names from
+    the whole tree would let an inner `WITH customers AS (...)` unlock a real outer table.
+    """
+    names: set[str] = set()
+    parent = node.parent
+    while parent is not None:
+        with_ = parent.args.get("with_")
+        if isinstance(with_, exp.With):
+            names.update(cte.alias_or_name.lower() for cte in with_.expressions)
+        parent = parent.parent
+    return names

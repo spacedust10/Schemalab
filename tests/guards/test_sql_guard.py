@@ -116,3 +116,21 @@ def test_table_function_error_names_the_function() -> None:
     # The model retries from this message, so it must say what was wrong.
     with pytest.raises(UnsafeSQLError, match="table functions are not allowed: READ_CSV"):
         check_sql("SELECT * FROM read_csv('/etc/passwd')", TABLES)
+
+
+def test_cte_name_does_not_leak_out_of_its_subquery() -> None:
+    # The inner CTE named "customers" must not make the outer, real customers table allowed.
+    sql = (
+        "SELECT * FROM customers WHERE id IN "
+        "(WITH customers AS (SELECT 1 AS id) SELECT id FROM customers)"
+    )
+    with pytest.raises(UnsafeSQLError, match="customers"):
+        check_sql(sql, {"orders"})
+
+
+def test_outer_cte_is_visible_in_nested_subqueries() -> None:
+    sql = (
+        "WITH big AS (SELECT * FROM orders) "
+        "SELECT * FROM (SELECT * FROM big) WHERE id IN (SELECT id FROM big)"
+    )
+    assert check_sql(sql, {"orders"})
