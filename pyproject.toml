@@ -52,6 +52,9 @@ packages = ["schemalab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import from src directly, so tests do not depend on the editable-install .pth file
+# (macOS can mark it hidden, and Python 3.12 then skips it).
+pythonpath = ["src"]
 addopts = "-q --strict-markers"
 # Any new warning fails the suite. The one exception is Starlette asking for httpx2 in its
 # TestClient; drop it once httpx2 is in the dev deps.
