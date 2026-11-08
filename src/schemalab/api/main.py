@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import json
+import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated, Any
@@ -19,6 +20,8 @@ from schemalab.api.corrections import router as corrections_router
 from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, NoModelsError, gateway_from_settings
 
+logger = logging.getLogger(__name__)
+
 
 class AskRequest(BaseModel):
     question: Annotated[
@@ -34,7 +37,11 @@ def get_gateway(settings: Annotated[Settings, Depends(get_settings)]) -> Gateway
     try:
         return gateway_from_settings(settings)
     except NoModelsError as e:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from None
+        # The details name config and env vars; they belong in the server log only.
+        logger.error("no usable model: %s", e)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "No language model is available right now."
+        ) from None
 
 
 def _sse(
@@ -68,12 +75,12 @@ def create_app() -> FastAPI:
 
     @app.post("/ask")
     def ask_endpoint(
+        user: UserDep,  # first, so no other dependency runs for an anonymous request
         body: AskRequest,
         db_path: Annotated[Path, Depends(get_db_path)],
         gateway: Annotated[Gateway, Depends(get_gateway)],
         settings: Annotated[Settings, Depends(get_settings)],
         engine: Annotated[Engine, Depends(get_engine)],
-        user: UserDep,
     ) -> StreamingResponse:
         with engine.connect() as conn:
             notes = [c["text"] for c in store.list_corrections(conn, user["id"])]

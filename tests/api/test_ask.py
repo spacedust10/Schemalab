@@ -82,7 +82,7 @@ def test_history_needs_a_session(client: TestClient) -> None:
     assert client.get("/history").status_code == 401
 
 
-def test_no_usable_model_is_a_clear_503(
+def test_no_usable_model_is_a_503(
     app: FastAPI, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
@@ -90,4 +90,22 @@ def test_no_usable_model_is_a_clear_503(
     app.dependency_overrides[get_settings] = lambda: Settings(models=["groq/openai/gpt-oss-120b"])
     resp = client.post("/ask", json={"question": "hi"}, headers=register(client))
     assert resp.status_code == 503
-    assert "GROQ_API_KEY" in resp.json()["detail"]
+
+
+def test_anonymous_ask_is_401_even_with_no_model(
+    app: FastAPI, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    app.dependency_overrides.pop(get_gateway, None)
+    app.dependency_overrides[get_settings] = lambda: Settings(models=["groq/openai/gpt-oss-120b"])
+    assert client.post("/ask", json={"question": "hi"}).status_code == 401
+
+
+def test_no_model_503_does_not_reveal_config(
+    app: FastAPI, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    app.dependency_overrides.pop(get_gateway, None)
+    app.dependency_overrides[get_settings] = lambda: Settings(models=["groq/openai/gpt-oss-120b"])
+    detail = client.post("/ask", json={"question": "hi"}, headers=register(client)).json()["detail"]
+    assert "groq" not in detail.lower() and "GROQ_API_KEY" not in detail
