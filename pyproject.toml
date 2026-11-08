@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "sqlglot>=30.30.0",
     "duckdb>=2.0.0",
+    "litellm>=1.108.3",
 ]
 
 [dependency-groups]
@@ -62,4 +63,6 @@ addopts = "-q --strict-markers"
 filterwarnings = [
     "error",
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    # Raised by Pydantic on a TypedDict inside LiteLLM's own modules, not our code.
+    "ignore:Items? .* (is|are) using the `ReadOnly` qualifier:UserWarning",
 ]
