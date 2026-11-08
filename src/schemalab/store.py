@@ -122,12 +122,20 @@ def authenticate(conn: Connection, email: str, password: str) -> int | None:
     return int(row.id) if row else None
 
 
-def record_login_attempt(
-    conn: Connection, email: str, ip: str, now: datetime | None = None
-) -> None:
+def record_login_attempt(conn: Connection, email: str, ip: str, now: datetime | None = None) -> int:
     """Record an attempt before checking it, and prune rows that no longer count."""
     conn.execute(delete(login_attempts).where(login_attempts.c.at <= _now() - LOGIN_WINDOW))
-    conn.execute(insert(login_attempts).values(email=email, ip=address_key(ip), at=now or _now()))
+    row = conn.execute(
+        insert(login_attempts)
+        .values(email=email, ip=address_key(ip), at=now or _now())
+        .returning(login_attempts.c.id)
+    ).one()
+    return int(row.id)
+
+
+def forget_login_attempt(conn: Connection, attempt_id: int) -> None:
+    """Drop an attempt that a lock refused, so hammering a lock cannot extend it."""
+    conn.execute(delete(login_attempts).where(login_attempts.c.id == attempt_id))
 
 
 def address_key(ip: str) -> str:
@@ -165,12 +173,9 @@ def login_locked_for(conn: Connection, email: str, ip: str) -> timedelta | None:
     return None
 
 
-def clear_login_attempts(conn: Connection, email: str, ip: str) -> None:
-    conn.execute(
-        delete(login_attempts).where(
-            login_attempts.c.email == email, login_attempts.c.ip == address_key(ip)
-        )
-    )
+def clear_login_attempts(conn: Connection, email: str) -> None:
+    """After a correct password, the email's failures from every address are forgiven."""
+    conn.execute(delete(login_attempts).where(login_attempts.c.email == email))
 
 
 def create_session(conn: Connection, user_id: int, now: datetime | None = None) -> str:

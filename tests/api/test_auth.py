@@ -166,8 +166,11 @@ def test_expired_sessions_are_deleted_on_next_sign_in(client: TestClient, engine
 
 def test_rotating_addresses_hits_a_per_email_ceiling(app: FastAPI, client: TestClient) -> None:
     register(client)
-    for i in range(store.MAX_LOGIN_FAILURES_PER_EMAIL):
-        login(from_ip(app, f"10.0.{i // 250}.{i % 250}"), "wrong password!")
+    per_address = store.MAX_LOGIN_FAILURES
+    for i in range(store.MAX_LOGIN_FAILURES_PER_EMAIL // per_address):
+        attacker = from_ip(app, f"10.0.0.{i + 1}")
+        for _ in range(per_address):
+            login(attacker, "wrong password!")
     assert login(from_ip(app, "192.0.2.77"), "wrong password!") == 429
 
 
@@ -183,3 +186,26 @@ def test_address_key_normalizes_ipv6_to_its_64() -> None:
     assert store.address_key("2001:db8:1:2:abcd::1") == "2001:db8:1:2::/64"
     assert store.address_key("203.0.113.9") == "203.0.113.9"
     assert store.address_key("testclient") == "testclient"
+
+
+def stored_attempts(engine: Engine) -> int:
+    with engine.connect() as conn:
+        return len(conn.execute(select(store.login_attempts)).all())
+
+
+def test_locked_attempts_are_not_counted(client: TestClient, engine: Engine) -> None:
+    register(client)
+    for _ in range(5):
+        login(client, "wrong password!")
+    assert [login(client, "wrong password!") for _ in range(10)] == [429] * 10
+    assert stored_attempts(engine) == 5  # hammering a lock does not extend it
+
+
+def test_success_clears_failures_from_every_address(
+    app: FastAPI, client: TestClient, engine: Engine
+) -> None:
+    register(client)
+    for _ in range(4):
+        login(from_ip(app, "203.0.113.9"), "wrong password!")
+    assert login(from_ip(app, "198.51.100.4"), PASSWORD) == 200
+    assert stored_attempts(engine) == 0

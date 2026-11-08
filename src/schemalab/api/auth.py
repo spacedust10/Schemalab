@@ -90,19 +90,22 @@ def login(body: LoginRequest, request: Request, engine: EngineDep) -> TokenRespo
     # behind a reverse proxy, trust its forwarded-for header here instead.
     ip = request.client.host if request.client else "unknown"
     with engine.begin() as conn:  # committed before the check, so parallel tries all count
-        store.record_login_attempt(conn, body.email, ip)
+        attempt_id = store.record_login_attempt(conn, body.email, ip)
     with engine.begin() as conn:
         locked = store.login_locked_for(conn, body.email, ip)
         if locked is not None:
-            raise HTTPException(
-                status.HTTP_429_TOO_MANY_REQUESTS,
-                "Too many failed sign-ins. Try again later.",
-                headers={"Retry-After": str(max(1, int(locked.total_seconds())))},
-            )
+            store.forget_login_attempt(conn, attempt_id)
+    if locked is not None:  # raised after the commit above, so the forget is kept
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many failed sign-ins. Try again later.",
+            headers={"Retry-After": str(max(1, int(locked.total_seconds())))},
+        )
+    with engine.begin() as conn:
         user_id = store.authenticate(conn, body.email, body.password)
         if user_id is None:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
-        store.clear_login_attempts(conn, body.email, ip)
+        store.clear_login_attempts(conn, body.email)
         return TokenResponse(token=store.create_session(conn, user_id))
 
 
