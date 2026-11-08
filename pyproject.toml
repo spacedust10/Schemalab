@@ -51,3 +51,9 @@ packages = ["schemalab"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+# Any new warning fails the suite. The one exception is Starlette asking for httpx2 in its
+# TestClient; drop it once httpx2 is in the dev deps.
+filterwarnings = [
+    "error",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
