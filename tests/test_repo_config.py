@@ -47,3 +47,9 @@ def test_ci_actions_are_pinned_to_commit_shas() -> None:
     assert uses, "expected at least one action"
     unpinned = [u for u in uses if not re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", u)]
     assert unpinned == []
+
+
+def test_api_container_sees_sample_data_read_only() -> None:
+    # /ask reads data/samples/schemalab.duckdb; the container must not be able to change it.
+    volumes = load("docker-compose.yml")["services"]["api"].get("volumes", [])
+    assert "./data/samples:/app/data/samples:ro" in volumes
