@@ -33,3 +33,4 @@ data/samples/*.duckdb
 
 # App database (accounts, history) when running outside Compose
 data/app.db
+data/demo_login.json
