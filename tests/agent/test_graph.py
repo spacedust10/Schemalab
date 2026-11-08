@@ -135,3 +135,24 @@ def test_unreadable_critic_reply_counts_as_no_verdict(sample_db: Path) -> None:
     events = run(sample_db, gw)
     assert events[-2]["step"] == "critic" and events[-2]["ok"] is None
     assert events[-1]["step"] == "answer"
+
+
+def test_answer_has_text_confidence_and_provenance(sample_db: Path) -> None:
+    gw = ScriptedGateway(PLAN, GOOD_SQL, OK)
+    answer = run(sample_db, gw)[-1]
+    assert answer["text"] == "n is 100."
+    assert answer["confidence"]["label"] == "high"
+    prov = answer["provenance"]
+    assert prov["sql"] == "SELECT COUNT(*) AS n FROM orders"
+    assert prov["tables"] == ["orders"]
+    assert prov["attempts"] == 1
+    assert prov["models"] == [MODEL]
+    assert prov["results_shared_with_model"] is False
+
+
+def test_shared_results_let_the_model_word_the_answer(sample_db: Path) -> None:
+    gw = ScriptedGateway(PLAN, GOOD_SQL, OK, "There are 100 orders.")
+    answer = list(run_agent("How many orders?", sample_db, gw, share_results=True))[-1]
+    assert answer["text"] == "There are 100 orders."
+    assert "100" in gw.prompt(3)
+    assert answer["provenance"]["results_shared_with_model"] is True

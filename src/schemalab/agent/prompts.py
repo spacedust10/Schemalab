@@ -54,3 +54,13 @@ GROUP BY columns, missing filters, or the wrong aggregate are problems.
 
 Reply with JSON only: {{"ok": true}} or {{"ok": false, "issue": "<one sentence>"}}
 """
+
+ANSWER = """Answer the question in one or two plain sentences using only this query result.
+Do not add facts that are not in the result.
+
+Question:
+{question}
+
+Result (columns: {columns}; first {shown} of {total} rows):
+{rows}
+"""

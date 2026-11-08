@@ -19,6 +19,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from schemalab.agent import prompts
+from schemalab.agent.answer import confidence, summarize, tables_read
 from schemalab.agent.ask import extract_sql, json_value
 from schemalab.agent.schema import describe_schema
 from schemalab.guards.run import QueryResult, QueryTimeoutError, run_query
@@ -42,15 +43,23 @@ class State(TypedDict, total=False):
     failed: bool
 
 
-def run_agent(question: str, db_path: Path, gateway: Gateway) -> Iterator[Event]:
-    graph = _build(db_path, gateway)
+def run_agent(
+    question: str, db_path: Path, gateway: Gateway, share_results: bool = False
+) -> Iterator[Event]:
+    """Stream the analyst's events. Result rows reach the model only if `share_results`."""
+    graph = _build(db_path, gateway, share_results)
     yield from graph.stream({"question": question, "attempt": 0}, stream_mode="custom")
 
 
-def _build(db_path: Path, gateway: Gateway) -> Any:
+def _build(db_path: Path, gateway: Gateway, share_results: bool) -> Any:
+    models_used: list[str] = []  # the graph is built per question, so this is per run
+
     def ask_model(messages: list[dict[str, str]]) -> Completion | None:
         try:
-            return gateway.complete(messages)
+            reply = gateway.complete(messages)
+            if reply.model not in models_used:
+                models_used.append(reply.model)
+            return reply
         except AllModelsFailedError as e:
             get_stream_writer()({"step": "error", "stage": "model", "message": str(e)})
             return None
@@ -147,7 +156,49 @@ def _build(db_path: Path, gateway: Gateway) -> Any:
         return {"verdict": ok, "problem": issue if ok is False else None}
 
     def answer(state: State) -> State:
-        get_stream_writer()({"step": "answer"})
+        result = state.get("result")
+        if result is None:
+            raise RuntimeError("answer reached without a result")  # routing guarantees one
+        rows = [[json_value(v) for v in row] for row in result.rows]
+        text = summarize(result.columns, rows, result.truncated)
+        if share_results:
+            shown = rows[:20]
+            reply = ask_model(
+                [
+                    {
+                        "role": "user",
+                        "content": prompts.ANSWER.format(
+                            question=state["question"],
+                            columns=", ".join(result.columns),
+                            shown=len(shown),
+                            total=len(rows),
+                            rows="\n".join(map(str, shown)),
+                        ),
+                    }
+                ]
+            )
+            if reply is not None:  # fall back to the plain summary if the model is down
+                text = reply.text.strip()
+        get_stream_writer()(
+            {
+                "step": "answer",
+                "text": text,
+                "confidence": confidence(
+                    attempts=state["attempt"],
+                    verdict=state.get("verdict"),
+                    issue=state.get("problem"),
+                    truncated=result.truncated,
+                    row_count=len(rows),
+                ),
+                "provenance": {
+                    "sql": result.sql,
+                    "tables": tables_read(result.sql),
+                    "attempts": state["attempt"],
+                    "models": models_used,
+                    "results_shared_with_model": share_results,
+                },
+            }
+        )
         return {}
 
     def after_critic(state: State) -> str:
