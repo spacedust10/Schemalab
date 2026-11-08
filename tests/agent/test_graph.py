@@ -3,10 +3,11 @@
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import litellm
 import pytest
 
-from schemalab.agent.graph import extract_sql, run_agent
+from schemalab.agent.graph import extract_sql, redact_values, run_agent
 from tests.agent.scripted import MODEL, ScriptedGateway
 
 PLAN = "Count rows in orders."
@@ -170,3 +171,41 @@ def test_shared_results_let_the_model_word_the_answer(sample_db: Path) -> None:
 )
 def test_extracts_sql_from_model_replies(text: str) -> None:
     assert extract_sql(text).rstrip(";") == "SELECT count(*) FROM orders"
+
+
+def test_database_errors_reach_the_model_without_row_values(tmp_path: Path) -> None:
+    db = tmp_path / "p.duckdb"
+    with duckdb.connect(str(db)) as con:
+        con.execute("CREATE TABLE patients (full_name VARCHAR, balance BIGINT)")
+        con.execute("INSERT INTO patients VALUES ('Zanzibar Quill', 987654321)")
+    leaky = [
+        "SELECT CAST(full_name AS INTEGER) FROM patients",  # quotes the string value
+        "SELECT CAST(balance AS TINYINT) FROM patients",  # quotes the number
+    ]
+    for sql in leaky:
+        gw = ScriptedGateway(PLAN, sql, "SELECT count(*) FROM patients", OK)
+        events = list(run_agent("?", db, gw))
+        retry = events[2]
+        assert retry["step"] == "retry" and retry["stage"] == "run"
+        retry_prompt = gw.prompt(2)
+        assert "Zanzibar" not in retry_prompt and "987654321" not in retry_prompt, retry_prompt
+        assert "Conversion Error" in retry_prompt  # the model still learns what went wrong
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "Conversion Error: Could not convert string 'Zanzibar Quill' to INT32",
+            "Conversion Error: Could not convert string '<value>' to INT32",
+        ),
+        (
+            "Type INT64 with value 987654321 can't be cast",
+            "Type INT64 with value <number> can't be cast",
+        ),
+        ('Referenced column "nope" not found', 'Referenced column "nope" not found'),
+        ("value 'O''Brien' and -3.5", "value '<value>' and <number>"),
+    ],
+)
+def test_redact_values_keeps_identifiers_and_types(message: str, expected: str) -> None:
+    assert redact_values(message) == expected

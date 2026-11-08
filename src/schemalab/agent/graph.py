@@ -130,7 +130,9 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool) -> Any:
             writer({"step": "error", **failure, "attempts": attempt})
             return {"failed": True, "result": None}
         writer({"step": "retry", **failure, "attempt": attempt})
-        return {"problem": message, "result": None}
+        # The user sees the full error; the model gets it with data values removed, since
+        # database errors can quote cell contents ("Could not convert string 'x' ...").
+        return {"problem": redact_values(message) if stage == "run" else message, "result": None}
 
     def critic(state: State) -> State:
         result = state.get("result")
@@ -258,6 +260,15 @@ def _usage(reply: Completion) -> Event:
         "tokens": reply.prompt_tokens + reply.completion_tokens,
         "latency_ms": round(reply.latency_ms),
     }
+
+
+_QUOTED = re.compile(r"'(?:[^']|'')*'")
+_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
+
+
+def redact_values(message: str) -> str:
+    """Strip quoted strings and bare numbers. Identifiers are double-quoted and survive."""
+    return _NUMBER.sub("<number>", _QUOTED.sub("'<value>'", message))
 
 
 def extract_sql(text: str) -> str:
