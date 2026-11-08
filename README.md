@@ -7,7 +7,7 @@ Students, professors and TAs use it to see what a database course usually only d
 [![CI](https://github.com/spacedust10/Schemalab/actions/workflows/ci.yml/badge.svg)](https://github.com/spacedust10/Schemalab/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-> **Status: early development (v0.1 in progress).** The SQL safety layer and the dataset loader work and are tested. The analyst, the UI and the lab modules are being built; see [Roadmap](#roadmap).
+> **Status: early development (v0.1 in progress).** The analyst API works end to end: accounts, the plan, SQL, critic and retry loop, the SQL safety layer, history and correction notes. The UI and the lab modules are being built; see [Roadmap](#roadmap).
 
 ## What it will do
 
@@ -55,6 +55,16 @@ uv run python -m schemalab.datasets
 ```
 
 This downloads the sample datasets, checks each file against a pinned SHA-256, and builds `data/samples/schemalab.duckdb`. Data files are never committed to the repo.
+
+### Try the analyst
+
+With the stack running, Ollama up (`ollama pull llama3.1`) and the sample data built:
+
+```bash
+uv run python scripts/demo.py "What is the average fare by pickup borough?"
+```
+
+This signs in a local demo account and prints each step as it streams: the plan, the SQL for each attempt, the rows, the critic's verdict, and the answer with its confidence and provenance. The interactive API docs at http://localhost:8000/docs cover every endpoint; use **Authorize** with the token from `/auth/register` or `/auth/login`.
 
 ## Development
 
