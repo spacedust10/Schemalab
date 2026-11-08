@@ -5,7 +5,11 @@ API="${API:-http://localhost:${API_PORT:-8000}}"
 WEB="${WEB:-http://localhost:${WEB_PORT:-3000}}"
 
 curl -fsS "$API/health" >/dev/null
-curl -fsS "$WEB" | grep -q "API ok"
+curl -fsS "$WEB/login" | grep -q "Ask your data a question"
+# The web app refuses sign-in posts from other sites (login CSRF).
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/api/auth/login" \
+  -H 'content-type: application/json' -H 'origin: https://evil.example' -d '{}')
+test "$code" = 403
 
 email="smoke-$(date +%s)@example.com"
 token=$(curl -fsS -X POST "$API/auth/register" -H 'content-type: application/json' \
