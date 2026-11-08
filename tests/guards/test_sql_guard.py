@@ -134,3 +134,32 @@ def test_outer_cte_is_visible_in_nested_subqueries() -> None:
         "SELECT * FROM (SELECT * FROM big) WHERE id IN (SELECT id FROM big)"
     )
     assert check_sql(sql, {"orders"})
+
+
+CTE_BYPASSES = {
+    # In a non-recursive CTE, its own name inside the body means the real table.
+    "self reference": "WITH customers AS (SELECT * FROM customers) SELECT * FROM customers",
+    # A CTE body can only see CTEs defined before it.
+    "forward reference": "WITH a AS (SELECT * FROM customers), customers AS (SELECT 1 AS id) "
+    "SELECT * FROM a",
+}
+
+
+@pytest.mark.parametrize("sql", CTE_BYPASSES.values(), ids=CTE_BYPASSES.keys())
+def test_cte_cannot_unlock_a_real_table(sql: str, sample_db: Path) -> None:
+    with pytest.raises(UnsafeSQLError, match="customers"):
+        check_sql(sql, {"orders"})
+
+
+def test_earlier_cte_is_visible_in_a_later_one() -> None:
+    assert check_sql(
+        "WITH a AS (SELECT * FROM orders), b AS (SELECT * FROM a) SELECT * FROM b", {"orders"}
+    )
+
+
+def test_recursive_cte_can_reference_itself() -> None:
+    sql = (
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5) "
+        "SELECT * FROM n"
+    )
+    assert check_sql(sql, {"orders"})

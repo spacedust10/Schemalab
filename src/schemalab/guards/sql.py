@@ -6,6 +6,7 @@ allow-list. Everything else is rejected before it reaches DuckDB. The read-only 
 """
 
 from collections.abc import Collection
+from typing import Any
 
 import sqlglot
 from sqlglot import exp
@@ -78,16 +79,28 @@ def _check_tables(tree: exp.Expression, allowed_tables: Collection[str]) -> None
 
 
 def _visible_ctes(node: exp.Expression) -> set[str]:
-    """CTE names in scope at `node`: those on the WITH of any enclosing query.
+    """CTE names in scope at `node`, following SQL's scoping rules.
 
-    A CTE defined inside a subquery is not visible outside it, so collecting CTE names from
-    the whole tree would let an inner `WITH customers AS (...)` unlock a real outer table.
+    - A CTE is visible inside the query that owns its WITH, including nested subqueries,
+      but not outside it.
+    - Inside a CTE body, only CTEs defined earlier in the same WITH are visible, plus the
+      CTE itself when the WITH is RECURSIVE. Otherwise a name like `customers` inside
+      `WITH customers AS (SELECT * FROM customers)` means the real table.
     """
     names: set[str] = set()
+    child: Any = node  # sqlglot types parents as Expr, nodes as Expression
     parent = node.parent
     while parent is not None:
-        with_ = parent.args.get("with_")
-        if isinstance(with_, exp.With):
-            names.update(cte.alias_or_name.lower() for cte in with_.expressions)
-        parent = parent.parent
+        if isinstance(parent, exp.With):
+            for cte in parent.expressions:
+                if cte is child:
+                    if parent.args.get("recursive"):
+                        names.add(cte.alias_or_name.lower())
+                    break
+                names.add(cte.alias_or_name.lower())
+        else:
+            with_ = parent.args.get("with_")
+            if isinstance(with_, exp.With) and child is not with_:
+                names.update(cte.alias_or_name.lower() for cte in with_.expressions)
+        child, parent = parent, parent.parent
     return names
