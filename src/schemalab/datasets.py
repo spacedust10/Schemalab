@@ -106,7 +106,73 @@ def _download(url: str, dest: Path) -> None:
     part.replace(dest)
 
 
-REGISTRY: dict[str, Dataset] = {}
+_TLC = "https://d37ci6vzurychx.cloudfront.net"
+_OLIST_FILES = {
+    "olist_customers": "olist_customers_dataset.csv",
+    "olist_geolocation": "olist_geolocation_dataset.csv",
+    "olist_order_items": "olist_order_items_dataset.csv",
+    "olist_order_payments": "olist_order_payments_dataset.csv",
+    "olist_order_reviews": "olist_order_reviews_dataset.csv",
+    "olist_orders": "olist_orders_dataset.csv",
+    "olist_products": "olist_products_dataset.csv",
+    "olist_sellers": "olist_sellers_dataset.csv",
+    "olist_category_translation": "product_category_name_translation.csv",
+}
+
+REGISTRY: dict[str, Dataset] = {
+    ds.name: ds
+    for ds in [
+        Dataset(
+            name="nyc_taxi",
+            description="NYC yellow taxi trips for January 2024 (about 3 million rows) and the "
+            "taxi zone lookup. The scale dataset.",
+            license="NYC Open Data terms of use",
+            homepage="https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+            tags=["scale", "time", "geo"],
+            sources=[
+                Source(
+                    table="taxi_trips",
+                    url=f"{_TLC}/trip-data/yellow_tripdata_2024-01.parquet",
+                    sha256="c4d59da7bbc8abaeeeb1727947ee93d9891a71acb42854bd80db1571b2030510",
+                ),
+                Source(
+                    table="taxi_zones",
+                    url=f"{_TLC}/misc/taxi_zone_lookup.csv",
+                    sha256="1a99e105092230f8620f301edcca7f80d3080642ff404d28ed957d3fa222c8ed",
+                ),
+            ],
+        ),
+        Dataset(
+            name="michigan_insurance",
+            description="Small Area Health Insurance Estimates for Michigan counties by year, "
+            "age, race, sex and income, in long format.",
+            license="Public domain (US Census Bureau SAHIE, via data.michigan.gov)",
+            homepage="https://data.michigan.gov/d/gc3p-9fhp",
+            tags=["michigan", "public-health", "long-format"],
+            sources=[
+                Source(
+                    table="mi_insurance",
+                    url="https://data.michigan.gov/api/views/gc3p-9fhp/rows.csv",
+                    filename="sahie_insurance.csv",
+                    # data.michigan.gov serves the live table; if the state republishes it, this
+                    # check fails and the pin must be updated after a look at the new file.
+                    sha256="f8bc1951fd586564e99f0b3262bc6e07049c90ff7977dc1dc6fb6b2a7eeaa737",
+                ),
+            ],
+        ),
+        Dataset(
+            name="olist",
+            description="Brazilian e-commerce orders, items, payments, reviews, customers, "
+            "sellers and products from Olist, 2016 to 2018. The business-metrics dataset.",
+            license="CC BY-NC-SA 4.0",
+            homepage="https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce",
+            tags=["business", "joins", "time"],
+            manual_steps="Kaggle needs a login: download the archive from "
+            "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce and unzip the CSVs.",
+            sources=[Source(table=t, filename=f) for t, f in _OLIST_FILES.items()],
+        ),
+    ]
+}
 
 
 def main(argv: list[str]) -> None:
