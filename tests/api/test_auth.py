@@ -162,3 +162,24 @@ def test_expired_sessions_are_deleted_on_next_sign_in(client: TestClient, engine
         expiries = conn.execute(select(store.sessions.c.expires_at)).scalars().all()
     assert all(store._aware(e) > datetime.now(UTC) for e in expiries)
     assert len(expiries) == 2  # the one from register and the new one
+
+
+def test_rotating_addresses_hits_a_per_email_ceiling(app: FastAPI, client: TestClient) -> None:
+    register(client)
+    for i in range(store.MAX_LOGIN_FAILURES_PER_EMAIL):
+        login(from_ip(app, f"10.0.{i // 250}.{i % 250}"), "wrong password!")
+    assert login(from_ip(app, "192.0.2.77"), "wrong password!") == 429
+
+
+def test_ipv6_addresses_in_one_64_count_together(app: FastAPI, client: TestClient) -> None:
+    register(client)
+    for i in range(5):
+        login(from_ip(app, f"2001:db8:1:2::{i + 1:x}"), "wrong password!")
+    assert login(from_ip(app, "2001:db8:1:2:ffff::9"), "wrong password!") == 429
+    assert login(from_ip(app, "2001:db8:1:3::1"), PASSWORD) == 200  # a different /64
+
+
+def test_address_key_normalizes_ipv6_to_its_64() -> None:
+    assert store.address_key("2001:db8:1:2:abcd::1") == "2001:db8:1:2::/64"
+    assert store.address_key("203.0.113.9") == "203.0.113.9"
+    assert store.address_key("testclient") == "testclient"

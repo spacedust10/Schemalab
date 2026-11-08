@@ -5,6 +5,7 @@ and only their SHA-256 hash is stored, so a database leak gives no working token
 """
 
 import hashlib
+import ipaddress
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -31,7 +32,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 SESSION_TTL = timedelta(days=7)
-MAX_LOGIN_FAILURES = 5
+MAX_LOGIN_FAILURES = 5  # per email and address
+MAX_LOGIN_FAILURES_PER_EMAIL = 50  # per email across all addresses, against IP rotation
 LOGIN_WINDOW = timedelta(minutes=15)
 
 metadata = MetaData()
@@ -77,7 +79,7 @@ login_attempts = Table(
     metadata,
     Column("id", Integer, primary_key=True),
     Column("email", String(254), nullable=False, index=True),
-    Column("ip", String(45), nullable=False),
+    Column("ip", String(64), nullable=False),  # an IPv4 address or an IPv6 /64
     Column("at", DateTime(timezone=True), nullable=False, index=True),
 )
 
@@ -125,36 +127,49 @@ def record_login_attempt(
 ) -> None:
     """Record an attempt before checking it, and prune rows that no longer count."""
     conn.execute(delete(login_attempts).where(login_attempts.c.at <= _now() - LOGIN_WINDOW))
-    conn.execute(insert(login_attempts).values(email=email, ip=ip, at=now or _now()))
+    conn.execute(insert(login_attempts).values(email=email, ip=address_key(ip), at=now or _now()))
+
+
+def address_key(ip: str) -> str:
+    """IPv6 clients are keyed by their /64, since one host can rotate within it."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 6:
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
 
 
 def login_locked_for(conn: Connection, email: str, ip: str) -> timedelta | None:
-    """Time left if this email has too many recent attempts from this address, else None.
+    """Time left on a lock for this email, or None.
 
-    The count includes the attempt being made, which was recorded first, so parallel
-    requests cannot all slip in under the limit before any of them is counted.
+    Two limits: a few attempts per email and address, so a guesser locks only their own
+    address, and a higher ceiling per email across all addresses, so rotating addresses
+    does not give unlimited guesses. The count includes the attempt being made, which was
+    recorded first, so parallel requests cannot all slip in under the limit.
     """
-    times = (
-        conn.execute(
-            select(login_attempts.c.at)
-            .where(
-                login_attempts.c.email == email,
-                login_attempts.c.ip == ip,
-                login_attempts.c.at > _now() - LOGIN_WINDOW,
-            )
-            .order_by(login_attempts.c.at)
+    since = _now() - LOGIN_WINDOW
+    recent = login_attempts.c.email == email, login_attempts.c.at > since
+    for where, limit in [
+        ((*recent, login_attempts.c.ip == address_key(ip)), MAX_LOGIN_FAILURES),
+        (recent, MAX_LOGIN_FAILURES_PER_EMAIL),
+    ]:
+        times = (
+            conn.execute(select(login_attempts.c.at).where(*where).order_by(login_attempts.c.at))
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
-    if len(times) <= MAX_LOGIN_FAILURES:
-        return None
-    return _aware(times[-MAX_LOGIN_FAILURES - 1]) + LOGIN_WINDOW - _now()
+        if len(times) > limit:
+            return _aware(times[-limit - 1]) + LOGIN_WINDOW - _now()
+    return None
 
 
 def clear_login_attempts(conn: Connection, email: str, ip: str) -> None:
     conn.execute(
-        delete(login_attempts).where(login_attempts.c.email == email, login_attempts.c.ip == ip)
+        delete(login_attempts).where(
+            login_attempts.c.email == email, login_attempts.c.ip == address_key(ip)
+        )
     )
 
 
