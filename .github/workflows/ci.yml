@@ -50,7 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker compose up -d --build --wait
-      - run: curl -fsS localhost:8000/health
-      - run: curl -fsS localhost:3000 | grep -q "API ok"
+      - run: ./scripts/smoke.sh
       - if: failure()
         run: docker compose logs

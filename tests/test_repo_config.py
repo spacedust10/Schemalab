@@ -53,3 +53,9 @@ def test_api_container_sees_sample_data_read_only() -> None:
     # /ask reads data/samples/schemalab.duckdb; the container must not be able to change it.
     volumes = load("docker-compose.yml")["services"]["api"].get("volumes", [])
     assert "./data/samples:/app/data/samples:ro" in volumes
+
+
+def test_api_uses_postgres_through_psycopg3() -> None:
+    # A bare postgresql:// URL makes SQLAlchemy load psycopg2, which is not installed.
+    env = load("docker-compose.yml")["services"]["api"]["environment"]
+    assert env["SCHEMALAB_DATABASE_URL"].startswith("postgresql+psycopg://")
