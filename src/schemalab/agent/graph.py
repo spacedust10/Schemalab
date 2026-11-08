@@ -8,6 +8,8 @@ Every node reports what it did through the stream writer, so `/ask` can show eac
 it happens. Model prompts carry the schema and the agent's own SQL, never row values.
 """
 
+import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -36,6 +38,7 @@ class State(TypedDict, total=False):
     attempt: int
     problem: str | None  # why the latest attempt must be redone
     result: QueryResult | None
+    verdict: bool | None  # critic: True ok, False objected, None no usable verdict
     failed: bool
 
 
@@ -128,15 +131,30 @@ def _build(db_path: Path, gateway: Gateway) -> Any:
             row_count=len(result.rows),
             columns=", ".join(result.columns),
         )
+        writer = get_stream_writer()
+        attempt = state["attempt"]
+        if not result.rows:
+            # No model needed: an empty result is suspicious enough to try again.
+            issue: str | None = "The query returned no rows; check the filters and joins."
+            writer({"step": "critic", "ok": False, "issue": issue, "attempt": attempt})
+            return {"verdict": False, "problem": issue}
+
         reply = ask_model([{"role": "user", "content": prompt}])
         if reply is None:
             return {"failed": True}
-        get_stream_writer()({"step": "critic", "ok": True, **_usage(reply)})
-        return {}
+        ok, issue = _parse_verdict(reply.text)
+        writer({"step": "critic", "ok": ok, "issue": issue, "attempt": attempt, **_usage(reply)})
+        return {"verdict": ok, "problem": issue if ok is False else None}
 
     def answer(state: State) -> State:
         get_stream_writer()({"step": "answer"})
         return {}
+
+    def after_critic(state: State) -> str:
+        if state.get("failed"):
+            return END
+        retry = state.get("verdict") is False and state["attempt"] < MAX_ATTEMPTS
+        return "write_sql" if retry else "answer"
 
     def after_model(next_node: str) -> Any:
         return lambda state: END if state.get("failed") else next_node
@@ -161,9 +179,22 @@ def _build(db_path: Path, gateway: Gateway) -> Any:
     g.add_conditional_edges("plan", after_model("write_sql"))
     g.add_conditional_edges("write_sql", after_model("run"))
     g.add_conditional_edges("run", after_run)
-    g.add_conditional_edges("critic", after_model("answer"))
+    g.add_conditional_edges("critic", after_critic)
     g.add_edge("answer", END)
     return g.compile()
+
+
+def _parse_verdict(text: str) -> tuple[bool | None, str | None]:
+    """Read the critic's JSON. Anything unreadable is "no verdict", not a pass."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    try:
+        data = json.loads(match.group(0)) if match else None
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("ok"), bool):
+        return None, None
+    issue = data.get("issue")
+    return data["ok"], str(issue) if issue and not data["ok"] else None
 
 
 def _usage(reply: Completion) -> Event:

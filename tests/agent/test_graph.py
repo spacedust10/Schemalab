@@ -70,3 +70,68 @@ def test_model_outage_ends_with_an_error(sample_db: Path) -> None:
     events = run(sample_db, ScriptedGateway(down))
     assert steps(events) == ["schema", "error"]
     assert events[-1]["stage"] == "model"
+
+
+ISSUE = '{"ok": false, "issue": "Groups by date, but the question only asks per customer."}'
+
+
+def test_critic_objection_is_fed_back_and_retried(sample_db: Path) -> None:
+    gw = ScriptedGateway(PLAN, GOOD_SQL, ISSUE, GOOD_SQL, OK)
+    events = run(sample_db, gw)
+    assert steps(events) == [
+        "schema",
+        "plan",
+        "sql",
+        "result",
+        "critic",
+        "sql",
+        "result",
+        "critic",
+        "answer",
+    ]
+    first = events[4]
+    assert first["ok"] is False and "per customer" in first["issue"] and first["attempt"] == 1
+    assert "per customer" in gw.prompt(3)  # the rewrite sees the critic's issue
+    assert events[7]["ok"] is True
+
+
+def test_critic_never_sees_row_values(sample_db: Path) -> None:
+    gw = ScriptedGateway(PLAN, "SELECT name FROM customers ORDER BY name", OK)
+    events = run(sample_db, gw)
+    assert ["c0"] in events[3]["rows"]
+    critic_prompt = gw.prompt(2)
+    assert "SELECT name FROM customers" in critic_prompt and "10 rows" in critic_prompt
+    assert not any(f"c{i}" in critic_prompt.split() for i in range(10))
+
+
+def test_empty_result_is_retried_without_asking_the_critic(sample_db: Path) -> None:
+    empty = "SELECT * FROM orders WHERE amount < 0"
+    gw = ScriptedGateway(PLAN, empty, GOOD_SQL, OK)
+    events = run(sample_db, gw)
+    assert steps(events) == [
+        "schema",
+        "plan",
+        "sql",
+        "result",
+        "critic",
+        "sql",
+        "result",
+        "critic",
+        "answer",
+    ]
+    assert events[4]["ok"] is False and "no rows" in events[4]["issue"]
+    assert "model" not in events[4]  # decided without a model call
+
+
+def test_persistent_objection_still_answers(sample_db: Path) -> None:
+    gw = ScriptedGateway(PLAN, GOOD_SQL, ISSUE, GOOD_SQL, ISSUE, GOOD_SQL, ISSUE)
+    events = run(sample_db, gw)
+    assert steps(events)[-2:] == ["critic", "answer"]
+    assert events[-2]["ok"] is False and events[-2]["attempt"] == 3
+
+
+def test_unreadable_critic_reply_counts_as_no_verdict(sample_db: Path) -> None:
+    gw = ScriptedGateway(PLAN, GOOD_SQL, "Looks fine to me!")
+    events = run(sample_db, gw)
+    assert events[-2]["step"] == "critic" and events[-2]["ok"] is None
+    assert events[-1]["step"] == "answer"
