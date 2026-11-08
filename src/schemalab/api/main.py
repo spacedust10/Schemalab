@@ -1,18 +1,19 @@
 """FastAPI application entry point."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, StringConstraints
+from sqlalchemy import Engine
 
-from schemalab import __version__
+from schemalab import __version__, store
 from schemalab.agent.graph import run_agent
-from schemalab.api.auth import get_engine
+from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
 from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, gateway_from_settings
@@ -32,9 +33,16 @@ def get_gateway() -> Gateway:
     return gateway_from_settings(get_settings())
 
 
-def _sse(events: Iterator[dict[str, object]]) -> Iterator[str]:
+def _sse(
+    events: Iterator[dict[str, Any]], on_done: Callable[[dict[str, Any]], None]
+) -> Iterator[str]:
+    """Send each event; once the stream ends, hand the final event to `on_done`."""
+    last: dict[str, Any] | None = None
     for event in events:
+        last = event
         yield f"data: {json.dumps(event, default=str)}\n\n"
+    if last is not None:
+        on_done(last)
 
 
 def create_app() -> FastAPI:
@@ -59,14 +67,30 @@ def create_app() -> FastAPI:
         db_path: Annotated[Path, Depends(get_db_path)],
         gateway: Annotated[Gateway, Depends(get_gateway)],
         settings: Annotated[Settings, Depends(get_settings)],
+        engine: Annotated[Engine, Depends(get_engine)],
+        user: UserDep,
     ) -> StreamingResponse:
+        def save(outcome: dict[str, Any]) -> None:
+            with engine.begin() as conn:
+                store.add_history(conn, user["id"], body.question, outcome)
+
         # A sync generator: Starlette iterates it in a worker thread, so slow model calls do
         # not block the event loop.
         return StreamingResponse(
-            _sse(run_agent(body.question, db_path, gateway, settings.share_results_with_model)),
+            _sse(
+                run_agent(body.question, db_path, gateway, settings.share_results_with_model),
+                on_done=save,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.get("/history")
+    def history(
+        user: UserDep, engine: Annotated[Engine, Depends(get_engine)]
+    ) -> list[dict[str, Any]]:
+        with engine.connect() as conn:
+            return store.list_history(conn, user["id"])
 
     return app
 
