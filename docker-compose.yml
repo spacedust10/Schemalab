@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: schemalab
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-schemalab}
       POSTGRES_DB: schemalab
-    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    ports: ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U schemalab"]
@@ -23,7 +23,7 @@ services:
       # Ollama runs on the host so it can use the Mac GPU.
       OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://host.docker.internal:11434}
     extra_hosts: ["host.docker.internal:host-gateway"]
-    ports: ["${API_PORT:-8000}:8000"]
+    ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
     depends_on:
       postgres: { condition: service_healthy }
     healthcheck:
@@ -35,7 +35,7 @@ services:
     build: apps/web
     environment:
       API_URL: http://api:8000
-    ports: ["${WEB_PORT:-3000}:3000"]
+    ports: ["127.0.0.1:${WEB_PORT:-3000}:3000"]
     depends_on:
       api: { condition: service_healthy }
 
