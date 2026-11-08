@@ -19,3 +19,16 @@ def test_compose_ports_bind_to_localhost_only() -> None:
     assert published, "expected at least one published port"
     exposed = [(name, p) for name, p in published if not str(p).startswith("127.0.0.1:")]
     assert exposed == []
+
+
+def test_dependabot_watches_every_ecosystem() -> None:
+    # Nothing flagged the vulnerable Next.js on Day 1; every lockfile needs a watcher.
+    updates = load(".github/dependabot.yml")["updates"]
+    watched = {(u["package-ecosystem"], u["directory"]) for u in updates}
+    assert watched >= {
+        ("uv", "/"),
+        ("npm", "/apps/web"),
+        ("github-actions", "/"),
+        ("docker", "/"),
+        ("docker", "/apps/web"),
+    }
