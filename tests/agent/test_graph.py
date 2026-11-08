@@ -209,3 +209,17 @@ def test_database_errors_reach_the_model_without_row_values(tmp_path: Path) -> N
 )
 def test_redact_values_keeps_identifiers_and_types(message: str, expected: str) -> None:
     assert redact_values(message) == expected
+
+
+def test_missing_database_says_how_to_build_it(tmp_path: Path) -> None:
+    events = list(run_agent("?", tmp_path / "missing.duckdb", ScriptedGateway()))
+    assert steps(events) == ["error"]
+    assert events[0]["stage"] == "data"
+    assert "python -m schemalab.datasets" in events[0]["message"]
+
+
+def test_database_without_tables_says_how_to_build_it(tmp_path: Path) -> None:
+    db = tmp_path / "empty.duckdb"
+    duckdb.connect(str(db)).close()
+    events = list(run_agent("?", db, ScriptedGateway()))
+    assert steps(events) == ["error"] and events[0]["stage"] == "data"

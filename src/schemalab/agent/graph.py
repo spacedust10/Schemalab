@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from schemalab.agent import prompts
 from schemalab.agent.answer import confidence, summarize, tables_read
 from schemalab.agent.schema import describe_schema
+from schemalab.guards.engine import open_readonly
 from schemalab.guards.run import QueryResult, QueryTimeoutError, run_query
 from schemalab.guards.sql import UnsafeSQLError
 from schemalab.llm import AllModelsFailedError, Completion, Gateway
@@ -57,6 +58,14 @@ def run_agent(
 
     `notes` are the asking user's corrections, added to the planner, writer and critic.
     """
+    if not _has_tables(db_path):
+        yield {
+            "step": "error",
+            "stage": "data",
+            "message": f"No sample data at {db_path}. Build it with: "
+            "uv run python -m schemalab.datasets",
+        }
+        return
     graph = _build(db_path, gateway, share_results, prompts.notes_block(list(notes)))
     yield from graph.stream({"question": question, "attempt": 0}, stream_mode="custom")
 
@@ -249,6 +258,13 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool, notes: str) -> 
     g.add_conditional_edges("critic", after_critic)
     g.add_edge("answer", END)
     return g.compile()
+
+
+def _has_tables(db_path: Path) -> bool:
+    if not db_path.is_file():
+        return False
+    with open_readonly(db_path) as con:
+        return bool(con.execute("SHOW TABLES").fetchall())
 
 
 def _parse_verdict(text: str) -> tuple[bool | None, str | None]:
