@@ -148,6 +148,10 @@ def clear_login_failures(conn: Connection, email: str) -> None:
 
 
 def create_session(conn: Connection, user_id: int, now: datetime | None = None) -> str:
+    # Expired sessions are useless; drop the user's old ones whenever a new one starts.
+    conn.execute(
+        delete(sessions).where(sessions.c.user_id == user_id, sessions.c.expires_at <= _now())
+    )
     token = secrets.token_urlsafe(32)
     conn.execute(
         insert(sessions).values(

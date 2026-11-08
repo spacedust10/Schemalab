@@ -128,3 +128,16 @@ def test_success_clears_earlier_failures(client: TestClient) -> None:
     assert login(client, PASSWORD) == 200
     assert [login(client, "wrong password!") for _ in range(4)] == [401] * 4
     assert login(client, PASSWORD) == 200
+
+
+def test_expired_sessions_are_deleted_on_next_sign_in(client: TestClient, engine: Engine) -> None:
+    register(client)
+    with engine.begin() as conn:
+        user_id = store.authenticate(conn, "ada@umich.edu", PASSWORD)
+        assert user_id is not None
+        store.create_session(conn, user_id, now=datetime.now(UTC) - timedelta(days=8))
+    assert login(client, PASSWORD) == 200
+    with engine.connect() as conn:
+        expiries = conn.execute(select(store.sessions.c.expires_at)).scalars().all()
+    assert all(store._aware(e) > datetime.now(UTC) for e in expiries)
+    assert len(expiries) == 2  # the one from register and the new one
