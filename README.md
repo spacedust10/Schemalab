@@ -7,7 +7,7 @@ Students, professors and TAs use it to see what a database course usually only d
 [![CI](https://github.com/spacedust10/Schemalab/actions/workflows/ci.yml/badge.svg)](https://github.com/spacedust10/Schemalab/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-> **Status: early development (v0.1 in progress).** The analyst API works end to end: accounts, the plan, SQL, critic and retry loop, the SQL safety layer, history and correction notes. The UI and the lab modules are being built; see [Roadmap](#roadmap).
+> **Status: early development (v0.1 in progress).** The analyst works end to end in the browser: accounts, the plan, SQL, critic and retry loop with every step shown live, the SQL safety layer, history and correction notes. The lab modules are being built; see [Roadmap](#roadmap).
 
 ## What it will do
 
@@ -58,7 +58,9 @@ This downloads the sample datasets, checks each file against a pinned SHA-256, a
 
 ### Try the analyst
 
-With the stack running, Ollama up (`ollama pull llama3.1`) and the sample data built:
+With the stack running, Ollama up (`ollama pull llama3.1`) and the sample data built, open http://localhost:3000, create an account and ask a question. The answer leads with a one-line finding and a chart; the panel on the right shows the plan, every SQL attempt with what the guard, the database and the reviewer made of it, and where the answer came from.
+
+From the terminal instead:
 
 ```bash
 uv run python scripts/demo.py "What is the average fare by pickup borough?"
