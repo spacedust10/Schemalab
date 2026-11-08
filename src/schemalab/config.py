@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Off: the model sees only the schema and its own SQL. On: it also sees up to 20 result
     # rows, to word the answer. Raw table rows are never sent either way.
     share_results_with_model: bool = False
+    # Accounts and history. Compose points this at Postgres.
+    database_url: str = "sqlite:///data/app.db"
 
 
 @lru_cache

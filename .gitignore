@@ -30,3 +30,6 @@ data/generated/
 # Sample data (built by python -m schemalab.datasets)
 data/cache/
 data/samples/*.duckdb
+
+# App database (accounts, history) when running outside Compose
+data/app.db

@@ -14,6 +14,9 @@ dependencies = [
     "duckdb>=2.0.0",
     "litellm>=1.108.3",
     "langgraph>=1.2.20",
+    "sqlalchemy>=2.1.8",
+    "argon2-cffi>=25.1.0",
+    "psycopg[binary]>=3.3.8",
 ]
 
 [dependency-groups]
@@ -44,8 +47,8 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests assert, and build fixture SQL from tmp paths.
-"tests/**" = ["S101", "S608"]
+# Tests assert, use fixed test passwords, and build fixture SQL from tmp paths.
+"tests/**" = ["S101", "S105", "S106", "S608"]
 
 [tool.mypy]
 python_version = "3.12"

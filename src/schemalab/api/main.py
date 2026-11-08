@@ -12,6 +12,8 @@ from pydantic import BaseModel, StringConstraints
 
 from schemalab import __version__
 from schemalab.agent.graph import run_agent
+from schemalab.api.auth import get_engine
+from schemalab.api.auth import router as auth_router
 from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, gateway_from_settings
 
@@ -41,9 +43,11 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
+
+    app.include_router(auth_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -66,5 +70,7 @@ def create_app() -> FastAPI:
 
     return app
 
+
+__all__ = ["app", "create_app", "get_db_path", "get_engine", "get_gateway", "get_settings"]
 
 app = create_app()
