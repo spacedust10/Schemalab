@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, StringConstraints
@@ -17,7 +17,7 @@ from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
 from schemalab.api.corrections import router as corrections_router
 from schemalab.config import Settings, get_settings
-from schemalab.llm import Gateway, gateway_from_settings
+from schemalab.llm import Gateway, NoModelsError, gateway_from_settings
 
 
 class AskRequest(BaseModel):
@@ -30,8 +30,11 @@ def get_db_path() -> Path:
     return Path(get_settings().db_path)
 
 
-def get_gateway() -> Gateway:
-    return gateway_from_settings(get_settings())
+def get_gateway(settings: Annotated[Settings, Depends(get_settings)]) -> Gateway:
+    try:
+        return gateway_from_settings(settings)
+    except NoModelsError as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from None
 
 
 def _sse(

@@ -75,7 +75,17 @@ class Gateway:
         raise AllModelsFailedError("all models failed:\n" + "\n".join(errors))
 
 
+class NoModelsError(RuntimeError):
+    """None of the configured models can be used."""
+
+
 def gateway_from_settings(settings: Settings) -> Gateway:
     models = available_models(settings.models)
+    if not models:
+        missing = sorted({k for m in settings.models if (k := _KEYS.get(m.split("/", 1)[0]))})
+        hint = f"set {' or '.join(missing)}, or " if missing else ""
+        raise NoModelsError(
+            f"No usable model in {settings.models}: {hint}add an ollama_chat/... model."
+        )
     options = {m: {"api_base": settings.ollama_api_base} for m in models if m.startswith("ollama")}
     return Gateway(models, options)

@@ -4,7 +4,13 @@ import litellm
 import pytest
 
 from schemalab.config import Settings
-from schemalab.llm import AllModelsFailedError, Gateway, available_models, gateway_from_settings
+from schemalab.llm import (
+    AllModelsFailedError,
+    Gateway,
+    NoModelsError,
+    available_models,
+    gateway_from_settings,
+)
 
 MSG = [{"role": "user", "content": "How many orders?"}]
 
@@ -88,3 +94,9 @@ def test_gateway_from_settings_uses_configured_models_and_ollama_base(
     gw = gateway_from_settings(Settings())
     assert gw.models == ["ollama_chat/llama3.1"]
     assert gw.options["ollama_chat/llama3.1"]["api_base"] == "http://host.docker.internal:11434"
+
+
+def test_no_usable_model_names_the_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(NoModelsError, match="GROQ_API_KEY"):
+        gateway_from_settings(Settings(models=["groq/openai/gpt-oss-120b"]))
