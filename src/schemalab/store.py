@@ -31,6 +31,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 SESSION_TTL = timedelta(days=7)
+MAX_LOGIN_FAILURES = 5
+LOGIN_WINDOW = timedelta(minutes=15)
 
 metadata = MetaData()
 
@@ -70,6 +72,14 @@ corrections = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+login_failures = Table(
+    "login_failures",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("email", String(254), nullable=False, index=True),
+    Column("at", DateTime(timezone=True), nullable=False),
+)
+
 _hasher = PasswordHasher()
 # Verified against when the email is unknown, so both failures take the same time.
 _DUMMY_HASH = _hasher.hash("not a real password")
@@ -107,6 +117,34 @@ def authenticate(conn: Connection, email: str, password: str) -> int | None:
     except VerificationError:
         return None
     return int(row.id) if row else None
+
+
+def record_login_failure(conn: Connection, email: str, now: datetime | None = None) -> None:
+    conn.execute(insert(login_failures).values(email=email, at=now or _now()))
+
+
+def login_locked_for(conn: Connection, email: str) -> timedelta | None:
+    """Time left on the lock if this email has too many recent failures, else None."""
+    since = _now() - LOGIN_WINDOW
+    times = (
+        conn.execute(
+            select(login_failures.c.at)
+            .where(login_failures.c.email == email, login_failures.c.at > since)
+            .order_by(login_failures.c.at)
+        )
+        .scalars()
+        .all()
+    )
+    if len(times) < MAX_LOGIN_FAILURES:
+        return None
+    # Unlocks once the oldest failure that still counts leaves the window.
+    return _aware(times[-MAX_LOGIN_FAILURES]) + LOGIN_WINDOW - _now()
+
+
+def clear_login_failures(conn: Connection, email: str) -> None:
+    # Also drops rows older than the window for everyone, so the table stays small.
+    conn.execute(delete(login_failures).where(login_failures.c.email == email))
+    conn.execute(delete(login_failures).where(login_failures.c.at <= _now() - LOGIN_WINDOW))
 
 
 def create_session(conn: Connection, user_id: int, now: datetime | None = None) -> str:

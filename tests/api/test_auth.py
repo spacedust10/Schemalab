@@ -89,3 +89,42 @@ def test_password_and_token_are_not_stored_in_plain_text(
         session = conn.execute(select(store.sessions)).one()
     assert PASSWORD not in user.password_hash and user.password_hash.startswith("$argon2id$")
     assert token not in session.token_hash and len(session.token_hash) == 64
+
+
+def login(client: TestClient, password: str, email: str = "ada@umich.edu") -> int:
+    return client.post("/auth/login", json={"email": email, "password": password}).status_code
+
+
+def test_five_failures_lock_the_email_for_a_while(client: TestClient) -> None:
+    register(client)
+    assert [login(client, "wrong password!") for _ in range(5)] == [401] * 5
+    resp = client.post("/auth/login", json={"email": "ada@umich.edu", "password": PASSWORD})
+    assert resp.status_code == 429  # even the right password, so guessing cannot continue
+    assert int(resp.headers["Retry-After"]) > 0
+
+
+def test_lock_is_per_email(client: TestClient) -> None:
+    register(client, "ada@umich.edu")
+    register(client, "grace@umich.edu")
+    for _ in range(5):
+        login(client, "wrong password!", "ada@umich.edu")
+    assert login(client, PASSWORD, "grace@umich.edu") == 200
+
+
+def test_old_failures_do_not_count(client: TestClient, engine: Engine) -> None:
+    register(client)
+    with engine.begin() as conn:
+        for _ in range(5):
+            store.record_login_failure(
+                conn, "ada@umich.edu", now=datetime.now(UTC) - timedelta(minutes=16)
+            )
+    assert login(client, PASSWORD) == 200
+
+
+def test_success_clears_earlier_failures(client: TestClient) -> None:
+    register(client)
+    for _ in range(4):
+        login(client, "wrong password!")
+    assert login(client, PASSWORD) == 200
+    assert [login(client, "wrong password!") for _ in range(4)] == [401] * 4
+    assert login(client, PASSWORD) == 200

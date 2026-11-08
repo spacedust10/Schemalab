@@ -85,12 +85,24 @@ def register(body: Credentials, engine: EngineDep) -> TokenResponse:
 
 @router.post("/auth/login")
 def login(body: LoginRequest, engine: EngineDep) -> TokenResponse:
-    # ponytail: no rate limit on attempts; add one before any public deployment.
+    # Per-email lock: stops guessing one account's password. It does not stop one password
+    # tried across many emails; add a per-IP limit for that before a public deployment.
     with engine.begin() as conn:
+        locked = store.login_locked_for(conn, body.email)
+        if locked is not None:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "Too many failed sign-ins. Try again later.",
+                headers={"Retry-After": str(max(1, int(locked.total_seconds())))},
+            )
         user_id = store.authenticate(conn, body.email, body.password)
         if user_id is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
-        return TokenResponse(token=store.create_session(conn, user_id))
+            store.record_login_failure(conn, body.email)
+        else:
+            store.clear_login_failures(conn, body.email)
+            return TokenResponse(token=store.create_session(conn, user_id))
+    # Raised after the transaction commits, so the failure is recorded.
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
