@@ -13,6 +13,7 @@ dependencies = [
     "sqlglot>=30.30.0",
     "duckdb>=2.0.0",
     "litellm>=1.108.3",
+    "langgraph>=1.2.20",
 ]
 
 [dependency-groups]

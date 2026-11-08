@@ -1,0 +1,175 @@
+"""The analyst as a LangGraph state machine.
+
+    schema -> plan -> write_sql -> run --ok--> critic --ok--> answer
+                          ^         |             |
+                          +--error--+--objection--+   (up to MAX_ATTEMPTS)
+
+Every node reports what it did through the stream writer, so `/ask` can show each step as
+it happens. Model prompts carry the schema and the agent's own SQL, never row values.
+"""
+
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any, Literal, TypedDict
+
+import duckdb
+from langgraph.config import get_stream_writer
+from langgraph.graph import END, START, StateGraph
+
+from schemalab.agent import prompts
+from schemalab.agent.ask import extract_sql, json_value
+from schemalab.agent.schema import describe_schema
+from schemalab.guards.run import QueryResult, QueryTimeoutError, run_query
+from schemalab.guards.sql import UnsafeSQLError
+from schemalab.llm import AllModelsFailedError, Completion, Gateway
+
+MAX_ATTEMPTS = 3
+
+Event = dict[str, Any]
+
+
+class State(TypedDict, total=False):
+    question: str
+    schema: str
+    plan: str
+    sql: str  # the latest model SQL, before the guard
+    attempt: int
+    problem: str | None  # why the latest attempt must be redone
+    result: QueryResult | None
+    failed: bool
+
+
+def run_agent(question: str, db_path: Path, gateway: Gateway) -> Iterator[Event]:
+    graph = _build(db_path, gateway)
+    yield from graph.stream({"question": question, "attempt": 0}, stream_mode="custom")
+
+
+def _build(db_path: Path, gateway: Gateway) -> Any:
+    def ask_model(messages: list[dict[str, str]]) -> Completion | None:
+        try:
+            return gateway.complete(messages)
+        except AllModelsFailedError as e:
+            get_stream_writer()({"step": "error", "stage": "model", "message": str(e)})
+            return None
+
+    def schema(state: State) -> State:
+        text = describe_schema(db_path)
+        get_stream_writer()({"step": "schema", "tables": text.count(" rows)")})
+        return {"schema": text}
+
+    def plan(state: State) -> State:
+        reply = ask_model(
+            [
+                {"role": "system", "content": prompts.PLAN.format(schema=state["schema"])},
+                {"role": "user", "content": state["question"]},
+            ]
+        )
+        if reply is None:
+            return {"failed": True}
+        get_stream_writer()({"step": "plan", "text": reply.text.strip(), **_usage(reply)})
+        return {"plan": reply.text.strip()}
+
+    def write_sql(state: State) -> State:
+        system = prompts.WRITE_SQL.format(plan=state["plan"], schema=state["schema"])
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": state["question"]},
+        ]
+        if state.get("problem"):
+            messages.append({"role": "assistant", "content": state["sql"]})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": prompts.RETRY.format(sql=state["sql"], problem=state["problem"]),
+                }
+            )
+        reply = ask_model(messages)
+        if reply is None:
+            return {"failed": True}
+        return {"sql": extract_sql(reply.text), "attempt": state["attempt"] + 1, "problem": None}
+
+    def run(state: State) -> State:
+        writer = get_stream_writer()
+        attempt, sql = state["attempt"], state["sql"]
+        stage: Literal["guard", "run"]
+        try:
+            result = run_query(db_path, sql)
+        except UnsafeSQLError as e:
+            stage, message = "guard", str(e)
+        except (QueryTimeoutError, duckdb.Error) as e:
+            stage, message = "run", str(e)
+        else:
+            writer({"step": "sql", "sql": result.sql, "attempt": attempt})
+            writer(
+                {
+                    "step": "result",
+                    "columns": result.columns,
+                    "rows": [[json_value(v) for v in row] for row in result.rows],
+                    "truncated": result.truncated,
+                }
+            )
+            return {"result": result}
+
+        failure = {"stage": stage, "message": message, "sql": sql}
+        if attempt >= MAX_ATTEMPTS:
+            writer({"step": "error", **failure, "attempts": attempt})
+            return {"failed": True, "result": None}
+        writer({"step": "retry", **failure, "attempt": attempt})
+        return {"problem": message, "result": None}
+
+    def critic(state: State) -> State:
+        result = state.get("result")
+        if result is None:
+            raise RuntimeError("critic reached without a result")  # routing guarantees one
+        prompt = prompts.CRITIC.format(
+            question=state["question"],
+            plan=state["plan"],
+            sql=result.sql,
+            row_count=len(result.rows),
+            columns=", ".join(result.columns),
+        )
+        reply = ask_model([{"role": "user", "content": prompt}])
+        if reply is None:
+            return {"failed": True}
+        get_stream_writer()({"step": "critic", "ok": True, **_usage(reply)})
+        return {}
+
+    def answer(state: State) -> State:
+        get_stream_writer()({"step": "answer"})
+        return {}
+
+    def after_model(next_node: str) -> Any:
+        return lambda state: END if state.get("failed") else next_node
+
+    def after_run(state: State) -> str:
+        if state.get("failed"):
+            return END
+        return "critic" if state.get("result") is not None else "write_sql"
+
+    g = StateGraph(State)
+    for name, fn in [
+        ("schema", schema),
+        ("plan", plan),
+        ("write_sql", write_sql),
+        ("run", run),
+        ("critic", critic),
+        ("answer", answer),
+    ]:
+        g.add_node(name, fn)
+    g.add_edge(START, "schema")
+    g.add_edge("schema", "plan")
+    g.add_conditional_edges("plan", after_model("write_sql"))
+    g.add_conditional_edges("write_sql", after_model("run"))
+    g.add_conditional_edges("run", after_run)
+    g.add_conditional_edges("critic", after_model("answer"))
+    g.add_edge("answer", END)
+    return g.compile()
+
+
+def _usage(reply: Completion) -> Event:
+    return {
+        "model": reply.model,
+        "failed_models": reply.failed,
+        "tokens": reply.prompt_tokens + reply.completion_tokens,
+        "latency_ms": round(reply.latency_ms),
+    }

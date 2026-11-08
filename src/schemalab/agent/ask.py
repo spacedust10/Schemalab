@@ -79,12 +79,12 @@ def ask(question: str, db_path: Path, gateway: Gateway) -> Iterator[Event]:
     yield {
         "step": "result",
         "columns": result.columns,
-        "rows": [[_json_value(v) for v in row] for row in result.rows],
+        "rows": [[json_value(v) for v in row] for row in result.rows],
         "truncated": result.truncated,
     }
 
 
-def _json_value(value: Any) -> Any:
+def json_value(value: Any) -> Any:
     if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, Decimal):
