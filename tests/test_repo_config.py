@@ -1,5 +1,6 @@
 """Checks on repo config files: Compose, CI and Dependabot."""
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,3 +33,17 @@ def test_dependabot_watches_every_ecosystem() -> None:
         ("docker", "/"),
         ("docker", "/apps/web"),
     }
+
+
+def test_ci_actions_are_pinned_to_commit_shas() -> None:
+    # A tag like @v4 can be moved to new code; a 40-char SHA cannot.
+    uses = [
+        step["uses"]
+        for path in (ROOT / ".github/workflows").glob("*.yml")
+        for job in load(str(path.relative_to(ROOT)))["jobs"].values()
+        for step in job["steps"]
+        if "uses" in step
+    ]
+    assert uses, "expected at least one action"
+    unpinned = [u for u in uses if not re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", u)]
+    assert unpinned == []
