@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any
 
 import litellm
+import pytest
 
-from schemalab.agent.graph import run_agent
+from schemalab.agent.graph import extract_sql, run_agent
 from tests.agent.scripted import MODEL, ScriptedGateway
 
 PLAN = "Count rows in orders."
@@ -156,3 +157,16 @@ def test_shared_results_let_the_model_word_the_answer(sample_db: Path) -> None:
     assert answer["text"] == "There are 100 orders."
     assert "100" in gw.prompt(3)
     assert answer["provenance"]["results_shared_with_model"] is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SELECT count(*) FROM orders",
+        "```sql\nSELECT count(*) FROM orders\n```",
+        "Here is the query:\n```\nSELECT count(*) FROM orders;\n```\nIt counts orders.",
+        "```SQL\nSELECT count(*) FROM orders\n```",
+    ],
+)
+def test_extracts_sql_from_model_replies(text: str) -> None:
+    assert extract_sql(text).rstrip(";") == "SELECT count(*) FROM orders"

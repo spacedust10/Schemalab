@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     ]
     ollama_api_base: str = "http://localhost:11434"
     db_path: str = "data/samples/schemalab.duckdb"
+    # Off: the model sees only the schema and its own SQL. On: it also sees up to 20 result
+    # rows, to word the answer. Raw table rows are never sent either way.
+    share_results_with_model: bool = False
 
 
 @lru_cache

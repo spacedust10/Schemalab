@@ -11,8 +11,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, StringConstraints
 
 from schemalab import __version__
-from schemalab.agent.ask import ask
-from schemalab.config import get_settings
+from schemalab.agent.graph import run_agent
+from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, gateway_from_settings
 
 
@@ -54,11 +54,12 @@ def create_app() -> FastAPI:
         body: AskRequest,
         db_path: Annotated[Path, Depends(get_db_path)],
         gateway: Annotated[Gateway, Depends(get_gateway)],
+        settings: Annotated[Settings, Depends(get_settings)],
     ) -> StreamingResponse:
         # A sync generator: Starlette iterates it in a worker thread, so slow model calls do
         # not block the event loop.
         return StreamingResponse(
-            _sse(ask(body.question, db_path, gateway)),
+            _sse(run_agent(body.question, db_path, gateway, settings.share_results_with_model)),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )

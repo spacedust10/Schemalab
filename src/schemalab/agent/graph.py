@@ -11,6 +11,8 @@ it happens. Model prompts carry the schema and the agent's own SQL, never row va
 import json
 import re
 from collections.abc import Iterator
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -20,13 +22,14 @@ from langgraph.graph import END, START, StateGraph
 
 from schemalab.agent import prompts
 from schemalab.agent.answer import confidence, summarize, tables_read
-from schemalab.agent.ask import extract_sql, json_value
 from schemalab.agent.schema import describe_schema
 from schemalab.guards.run import QueryResult, QueryTimeoutError, run_query
 from schemalab.guards.sql import UnsafeSQLError
 from schemalab.llm import AllModelsFailedError, Completion, Gateway
 
 MAX_ATTEMPTS = 3
+
+_FENCE = re.compile(r"```(?:sql)?\s*\n(.*?)```", re.IGNORECASE | re.DOTALL)
 
 Event = dict[str, Any]
 
@@ -255,3 +258,17 @@ def _usage(reply: Completion) -> Event:
         "tokens": reply.prompt_tokens + reply.completion_tokens,
         "latency_ms": round(reply.latency_ms),
     }
+
+
+def extract_sql(text: str) -> str:
+    """Take the SQL out of a model reply: the first fenced block, else the whole reply."""
+    match = _FENCE.search(text)
+    return (match.group(1) if match else text).strip()
+
+
+def json_value(value: Any) -> Any:
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
