@@ -1,6 +1,10 @@
 """The parser guard: the first line of defense for model-written SQL."""
 
+from pathlib import Path
+
 import pytest
+
+from schemalab.guards.engine import open_readonly
 from schemalab.guards.sql import UnsafeSQLError, check_sql
 
 TABLES = frozenset({"orders", "customers"})
@@ -78,6 +82,7 @@ BLOCKED = {
     "file in lateral join": "SELECT * FROM orders, read_csv('/etc/passwd')",
     "query table function": "SELECT * FROM query_table('orders')",
     "range": "SELECT * FROM range(1000000000)",
+    "function named like a table": "SELECT * FROM orders()",
     # Scalar functions that leak the host
     "getenv": "SELECT getenv('HOME') FROM orders",
     "current_setting": "SELECT current_setting('home_directory')",
@@ -100,3 +105,14 @@ def test_blocks_unsafe_sql(sql: str) -> None:
 def test_error_says_why() -> None:
     with pytest.raises(UnsafeSQLError, match="users"):
         check_sql("SELECT * FROM users", TABLES)
+
+
+@pytest.mark.parametrize("sql", ALLOWED)
+def test_normalized_sql_runs_on_readonly_engine(sql: str, sample_db: Path) -> None:
+    open_readonly(sample_db).execute(check_sql(sql, TABLES)).fetchall()
+
+
+def test_table_function_error_names_the_function() -> None:
+    # The model retries from this message, so it must say what was wrong.
+    with pytest.raises(UnsafeSQLError, match="table functions are not allowed: READ_CSV"):
+        check_sql("SELECT * FROM read_csv('/etc/passwd')", TABLES)
