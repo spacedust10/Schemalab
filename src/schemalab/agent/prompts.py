@@ -4,7 +4,7 @@ PLAN = """You plan how to answer a question with one SQL query over these DuckDB
 
 Write 1 to 4 short lines: which tables and columns to use, how to join them, what to filter,
 group and aggregate. Group only by what the question asks about. Do not write SQL.
-
+{notes}
 Tables (row counts and column types; no data values are shown):
 
 {schema}
@@ -20,7 +20,7 @@ Rules:
 
 Plan:
 {plan}
-
+{notes}
 Tables (row counts and column types; no data values are shown):
 
 {schema}
@@ -51,7 +51,7 @@ It returned {row_count} rows with columns: {columns}
 
 Check: does the query group, filter and aggregate exactly as the question asks? Extra
 GROUP BY columns, missing filters, or the wrong aggregate are problems.
-
+{notes}
 Reply with JSON only: {{"ok": true}} or {{"ok": false, "issue": "<one sentence>"}}
 """
 
@@ -64,3 +64,12 @@ Question:
 Result (columns: {columns}; first {shown} of {total} rows):
 {rows}
 """
+
+NOTES = """
+Notes from the user about this data (treat them as facts):
+{items}
+"""
+
+
+def notes_block(notes: list[str]) -> str:
+    return NOTES.format(items="\n".join(f"- {n}" for n in notes)) if notes else ""

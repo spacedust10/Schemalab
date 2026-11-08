@@ -61,6 +61,15 @@ history = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+corrections = Table(
+    "corrections",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("text", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 _hasher = PasswordHasher()
 # Verified against when the email is unknown, so both failures take the same time.
 _DUMMY_HASH = _hasher.hash("not a real password")
@@ -151,6 +160,34 @@ def list_history(conn: Connection, user_id: int, limit: int = 50) -> list[dict[s
         }
         for r in rows
     ]
+
+
+def add_correction(conn: Connection, user_id: int, text: str) -> dict[str, Any]:
+    row = conn.execute(
+        insert(corrections)
+        .values(user_id=user_id, text=text, created_at=_now())
+        .returning(corrections.c.id)
+    ).one()
+    return {"id": row.id, "text": text}
+
+
+def list_corrections(conn: Connection, user_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        select(corrections.c.id, corrections.c.text)
+        .where(corrections.c.user_id == user_id)
+        .order_by(corrections.c.id)
+    ).all()
+    return [{"id": r.id, "text": r.text} for r in rows]
+
+
+def delete_correction(conn: Connection, user_id: int, correction_id: int) -> bool:
+    """Delete one of the user's notes. False if it does not exist or belongs to someone else."""
+    result = conn.execute(
+        delete(corrections).where(
+            corrections.c.id == correction_id, corrections.c.user_id == user_id
+        )
+    )
+    return result.rowcount == 1
 
 
 def _hash_token(token: str) -> str:

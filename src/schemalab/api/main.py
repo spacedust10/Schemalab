@@ -15,6 +15,7 @@ from schemalab import __version__, store
 from schemalab.agent.graph import run_agent
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
+from schemalab.api.corrections import router as corrections_router
 from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, gateway_from_settings
 
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(auth_router)
+    app.include_router(corrections_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -70,6 +72,9 @@ def create_app() -> FastAPI:
         engine: Annotated[Engine, Depends(get_engine)],
         user: UserDep,
     ) -> StreamingResponse:
+        with engine.connect() as conn:
+            notes = [c["text"] for c in store.list_corrections(conn, user["id"])]
+
         def save(outcome: dict[str, Any]) -> None:
             with engine.begin() as conn:
                 store.add_history(conn, user["id"], body.question, outcome)
@@ -78,7 +83,13 @@ def create_app() -> FastAPI:
         # not block the event loop.
         return StreamingResponse(
             _sse(
-                run_agent(body.question, db_path, gateway, settings.share_results_with_model),
+                run_agent(
+                    body.question,
+                    db_path,
+                    gateway,
+                    share_results=settings.share_results_with_model,
+                    notes=notes,
+                ),
                 on_done=save,
             ),
             media_type="text/event-stream",

@@ -10,7 +10,7 @@ it happens. Model prompts carry the schema and the agent's own SQL, never row va
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -47,14 +47,21 @@ class State(TypedDict, total=False):
 
 
 def run_agent(
-    question: str, db_path: Path, gateway: Gateway, share_results: bool = False
+    question: str,
+    db_path: Path,
+    gateway: Gateway,
+    share_results: bool = False,
+    notes: Sequence[str] = (),
 ) -> Iterator[Event]:
-    """Stream the analyst's events. Result rows reach the model only if `share_results`."""
-    graph = _build(db_path, gateway, share_results)
+    """Stream the analyst's events. Result rows reach the model only if `share_results`.
+
+    `notes` are the asking user's corrections, added to the planner, writer and critic.
+    """
+    graph = _build(db_path, gateway, share_results, prompts.notes_block(list(notes)))
     yield from graph.stream({"question": question, "attempt": 0}, stream_mode="custom")
 
 
-def _build(db_path: Path, gateway: Gateway, share_results: bool) -> Any:
+def _build(db_path: Path, gateway: Gateway, share_results: bool, notes: str) -> Any:
     models_used: list[str] = []  # the graph is built per question, so this is per run
 
     def ask_model(messages: list[dict[str, str]]) -> Completion | None:
@@ -75,7 +82,10 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool) -> Any:
     def plan(state: State) -> State:
         reply = ask_model(
             [
-                {"role": "system", "content": prompts.PLAN.format(schema=state["schema"])},
+                {
+                    "role": "system",
+                    "content": prompts.PLAN.format(schema=state["schema"], notes=notes),
+                },
                 {"role": "user", "content": state["question"]},
             ]
         )
@@ -85,7 +95,7 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool) -> Any:
         return {"plan": reply.text.strip()}
 
     def write_sql(state: State) -> State:
-        system = prompts.WRITE_SQL.format(plan=state["plan"], schema=state["schema"])
+        system = prompts.WRITE_SQL.format(plan=state["plan"], schema=state["schema"], notes=notes)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": state["question"]},
@@ -144,6 +154,7 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool) -> Any:
             sql=result.sql,
             row_count=len(result.rows),
             columns=", ".join(result.columns),
+            notes=notes,
         )
         writer = get_stream_writer()
         attempt = state["attempt"]
