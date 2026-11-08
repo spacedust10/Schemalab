@@ -1,0 +1,26 @@
+/* Placeholder base styles. The design system lands on Day 5 (see docs/design_principles.md). */
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf7;
+  --fg: #1c1b19;
+  --muted: #6b675f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141412;
+    --fg: #ecebe6;
+    --muted: #9c978c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
