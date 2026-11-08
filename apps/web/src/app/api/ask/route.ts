@@ -1,7 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, clearSession, upstream } from "@/lib/api";
+import { SESSION_COOKIE, clearSession, rejectCrossSite, upstream } from "@/lib/api";
 
 export async function POST(request: NextRequest): Promise<Response> {
+  const refused = rejectCrossSite(request);
+  if (refused) return refused;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return NextResponse.json({ detail: "Not signed in." }, { status: 401 });
 

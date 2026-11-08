@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, clearSession, setSession, upstream } from "@/lib/api";
+import { SESSION_COOKIE, clearSession, rejectCrossSite, setSession, upstream } from "@/lib/api";
 
 const SIGN_IN = new Set(["login", "register"]);
 
@@ -7,6 +7,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ action: string }> },
 ): Promise<NextResponse> {
+  const refused = rejectCrossSite(request);
+  if (refused) return refused;
   const { action } = await params;
 
   if (action === "logout") {

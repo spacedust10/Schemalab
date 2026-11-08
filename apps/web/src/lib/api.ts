@@ -2,7 +2,7 @@
  * Server-side access to the FastAPI backend. The browser talks only to these Next.js routes;
  * the session token lives in an httpOnly cookie that page scripts cannot read.
  */
-import type { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 export const API_URL = process.env.API_URL ?? "http://localhost:8000";
 export const SESSION_COOKIE = "sl_session";
@@ -27,4 +27,22 @@ export function setSession(res: NextResponse, token: string): void {
 
 export function clearSession(res: NextResponse): void {
   res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+}
+
+/**
+ * Refuse POSTs that did not come from our own pages: a JSON body (a cross-site HTML form can
+ * only send form or text bodies) and a same-origin request (Sec-Fetch-Site, else Origin).
+ * Without this, another site could sign a visitor in to an attacker's account.
+ */
+export function rejectCrossSite(request: NextRequest): NextResponse | null {
+  const site = request.headers.get("sec-fetch-site");
+  const origin = request.headers.get("origin");
+  const sameOrigin = site ? site === "same-origin" : origin === request.nextUrl.origin;
+  if (!sameOrigin) return NextResponse.json({ detail: "Cross-site request refused." }, { status: 403 });
+
+  const type = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (type !== "application/json") {
+    return NextResponse.json({ detail: "Send JSON." }, { status: 415 });
+  }
+  return null;
 }

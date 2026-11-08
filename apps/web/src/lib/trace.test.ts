@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { reduceTrace, type AgentEvent } from "./trace";
+import { emptyTrace, reduceTrace, type AgentEvent, type Trace } from "./trace";
 
-const run = (events: AgentEvent[]) => events.reduce(reduceTrace, undefined);
+const run = (events: AgentEvent[]): Trace => events.reduce(reduceTrace, emptyTrace);
 
 describe("reduceTrace", () => {
   it("groups SQL, retries and critic verdicts by attempt", () => {

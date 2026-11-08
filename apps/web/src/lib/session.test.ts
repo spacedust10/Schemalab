@@ -17,8 +17,13 @@ function fakeApi(respond: (call: Call) => Response): Call[] {
   return calls;
 }
 
-function req(path: string, body?: unknown, cookie?: string): NextRequest {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+function req(
+  path: string,
+  body?: unknown,
+  cookie?: string,
+  extra: Record<string, string> = { origin: "http://localhost:3000" },
+): NextRequest {
+  const headers: Record<string, string> = { "content-type": "application/json", ...extra };
   if (cookie) headers.cookie = `${SESSION_COOKIE}=${cookie}`;
   return new NextRequest(`http://localhost:3000${path}`, {
     method: body === undefined ? "GET" : "POST",
@@ -104,5 +109,46 @@ describe("proxy", () => {
 
   it("lets signed-in visitors through", () => {
     expect(proxy(req("/", undefined, "tok")).headers.get("location")).toBeNull();
+  });
+});
+
+describe("cross-site protection", () => {
+  const creds = { email: "a@b.co", password: "x".repeat(12) };
+
+  it.each([
+    ["another site's origin", { origin: "https://evil.example" }],
+    ["a cross-site fetch", { "sec-fetch-site": "cross-site" }],
+    ["no origin information at all", {}],
+  ])("refuses sign-in from %s", async (_, headers) => {
+    const calls = fakeApi(() => Response.json({ token: "tok" }));
+    const res = await auth(req("/api/auth/login", creds, undefined, headers), params("login"));
+    expect(res.status).toBe(403);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses a form-encoded or text body", async () => {
+    const calls = fakeApi(() => Response.json({ token: "tok" }));
+    const r = new NextRequest("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "text/plain", origin: "http://localhost:3000" },
+      body: JSON.stringify(creds),
+    });
+    expect((await auth(r, params("login"))).status).toBe(415);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("accepts a same-origin fetch identified only by Sec-Fetch-Site", async () => {
+    fakeApi(() => Response.json({ token: "tok" }));
+    const res = await auth(req("/api/auth/login", creds, undefined, { "sec-fetch-site": "same-origin" }), params("login"));
+    expect(res.status).toBe(200);
+  });
+
+  it.each(["/api/ask", "/api/auth/logout"])("guards %s too", async (path) => {
+    const calls = fakeApi(() => new Response(null, { status: 204 }));
+    const r = req(path, { question: "hi" }, "tok", { origin: "https://evil.example" });
+    const res = path === "/api/ask" ? await ask(r) : await auth(r, params("logout"));
+    expect(res.status).toBe(403);
+    expect(calls).toHaveLength(0);
   });
 });
