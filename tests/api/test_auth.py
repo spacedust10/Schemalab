@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 
@@ -95,12 +96,23 @@ def login(client: TestClient, password: str, email: str = "ada@umich.edu") -> in
     return client.post("/auth/login", json={"email": email, "password": password}).status_code
 
 
-def test_five_failures_lock_the_email_for_a_while(client: TestClient) -> None:
+def from_ip(app: FastAPI, ip: str) -> TestClient:
+    return TestClient(app, client=(ip, 50000))
+
+
+def test_five_failures_lock_that_email_from_that_address(client: TestClient) -> None:
     register(client)
     assert [login(client, "wrong password!") for _ in range(5)] == [401] * 5
     resp = client.post("/auth/login", json={"email": "ada@umich.edu", "password": PASSWORD})
     assert resp.status_code == 429  # even the right password, so guessing cannot continue
     assert int(resp.headers["Retry-After"]) > 0
+
+
+def test_an_attacker_cannot_lock_the_owner_out(app: FastAPI, client: TestClient) -> None:
+    register(client)
+    attacker = from_ip(app, "203.0.113.9")
+    assert [login(attacker, "wrong password!") for _ in range(6)][-1] == 429
+    assert login(from_ip(app, "198.51.100.4"), PASSWORD) == 200
 
 
 def test_lock_is_per_email(client: TestClient) -> None:
@@ -113,12 +125,21 @@ def test_lock_is_per_email(client: TestClient) -> None:
 
 def test_old_failures_do_not_count(client: TestClient, engine: Engine) -> None:
     register(client)
+    old = datetime.now(UTC) - timedelta(minutes=16)
     with engine.begin() as conn:
         for _ in range(5):
-            store.record_login_failure(
-                conn, "ada@umich.edu", now=datetime.now(UTC) - timedelta(minutes=16)
-            )
+            store.record_login_attempt(conn, "ada@umich.edu", "testclient", now=old)
     assert login(client, PASSWORD) == 200
+
+
+def test_every_attempt_prunes_expired_rows(client: TestClient, engine: Engine) -> None:
+    old = datetime.now(UTC) - timedelta(minutes=16)
+    with engine.begin() as conn:
+        for i in range(50):
+            store.record_login_attempt(conn, f"spam{i}@x.io", "203.0.113.9", now=old)
+    login(client, "wrong password!", "someone@umich.edu")  # a failure, not a success
+    with engine.connect() as conn:
+        assert conn.execute(select(store.login_attempts)).all().__len__() == 1
 
 
 def test_success_clears_earlier_failures(client: TestClient) -> None:

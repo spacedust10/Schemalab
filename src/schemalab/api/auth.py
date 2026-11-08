@@ -4,7 +4,7 @@ import re
 from functools import lru_cache
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import AfterValidator, BaseModel, StringConstraints
 from sqlalchemy import Engine
 
@@ -84,11 +84,15 @@ def register(body: Credentials, engine: EngineDep) -> TokenResponse:
 
 
 @router.post("/auth/login")
-def login(body: LoginRequest, engine: EngineDep) -> TokenResponse:
-    # Per-email lock: stops guessing one account's password. It does not stop one password
-    # tried across many emails; add a per-IP limit for that before a public deployment.
+def login(body: LoginRequest, request: Request, engine: EngineDep) -> TokenResponse:
+    # Keyed on email and client address: a guesser locks only their own address, and the
+    # owner can still sign in from theirs. ponytail: request.client is the direct peer;
+    # behind a reverse proxy, trust its forwarded-for header here instead.
+    ip = request.client.host if request.client else "unknown"
+    with engine.begin() as conn:  # committed before the check, so parallel tries all count
+        store.record_login_attempt(conn, body.email, ip)
     with engine.begin() as conn:
-        locked = store.login_locked_for(conn, body.email)
+        locked = store.login_locked_for(conn, body.email, ip)
         if locked is not None:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
@@ -97,12 +101,9 @@ def login(body: LoginRequest, engine: EngineDep) -> TokenResponse:
             )
         user_id = store.authenticate(conn, body.email, body.password)
         if user_id is None:
-            store.record_login_failure(conn, body.email)
-        else:
-            store.clear_login_failures(conn, body.email)
-            return TokenResponse(token=store.create_session(conn, user_id))
-    # Raised after the transaction commits, so the failure is recorded.
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+        store.clear_login_attempts(conn, body.email, ip)
+        return TokenResponse(token=store.create_session(conn, user_id))
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)

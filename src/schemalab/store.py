@@ -72,12 +72,13 @@ corrections = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
-login_failures = Table(
-    "login_failures",
+login_attempts = Table(
+    "login_attempts",
     metadata,
     Column("id", Integer, primary_key=True),
     Column("email", String(254), nullable=False, index=True),
-    Column("at", DateTime(timezone=True), nullable=False),
+    Column("ip", String(45), nullable=False),
+    Column("at", DateTime(timezone=True), nullable=False, index=True),
 )
 
 _hasher = PasswordHasher()
@@ -119,32 +120,42 @@ def authenticate(conn: Connection, email: str, password: str) -> int | None:
     return int(row.id) if row else None
 
 
-def record_login_failure(conn: Connection, email: str, now: datetime | None = None) -> None:
-    conn.execute(insert(login_failures).values(email=email, at=now or _now()))
+def record_login_attempt(
+    conn: Connection, email: str, ip: str, now: datetime | None = None
+) -> None:
+    """Record an attempt before checking it, and prune rows that no longer count."""
+    conn.execute(delete(login_attempts).where(login_attempts.c.at <= _now() - LOGIN_WINDOW))
+    conn.execute(insert(login_attempts).values(email=email, ip=ip, at=now or _now()))
 
 
-def login_locked_for(conn: Connection, email: str) -> timedelta | None:
-    """Time left on the lock if this email has too many recent failures, else None."""
-    since = _now() - LOGIN_WINDOW
+def login_locked_for(conn: Connection, email: str, ip: str) -> timedelta | None:
+    """Time left if this email has too many recent attempts from this address, else None.
+
+    The count includes the attempt being made, which was recorded first, so parallel
+    requests cannot all slip in under the limit before any of them is counted.
+    """
     times = (
         conn.execute(
-            select(login_failures.c.at)
-            .where(login_failures.c.email == email, login_failures.c.at > since)
-            .order_by(login_failures.c.at)
+            select(login_attempts.c.at)
+            .where(
+                login_attempts.c.email == email,
+                login_attempts.c.ip == ip,
+                login_attempts.c.at > _now() - LOGIN_WINDOW,
+            )
+            .order_by(login_attempts.c.at)
         )
         .scalars()
         .all()
     )
-    if len(times) < MAX_LOGIN_FAILURES:
+    if len(times) <= MAX_LOGIN_FAILURES:
         return None
-    # Unlocks once the oldest failure that still counts leaves the window.
-    return _aware(times[-MAX_LOGIN_FAILURES]) + LOGIN_WINDOW - _now()
+    return _aware(times[-MAX_LOGIN_FAILURES - 1]) + LOGIN_WINDOW - _now()
 
 
-def clear_login_failures(conn: Connection, email: str) -> None:
-    # Also drops rows older than the window for everyone, so the table stays small.
-    conn.execute(delete(login_failures).where(login_failures.c.email == email))
-    conn.execute(delete(login_failures).where(login_failures.c.at <= _now() - LOGIN_WINDOW))
+def clear_login_attempts(conn: Connection, email: str, ip: str) -> None:
+    conn.execute(
+        delete(login_attempts).where(login_attempts.c.email == email, login_attempts.c.ip == ip)
+    )
 
 
 def create_session(conn: Connection, user_id: int, now: datetime | None = None) -> str:
