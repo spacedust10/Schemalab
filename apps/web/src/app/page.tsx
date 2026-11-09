@@ -4,7 +4,7 @@ import { Masthead } from "@/components/Masthead";
 export default function Home() {
   return (
     <>
-      <Masthead signedIn />
+      <Masthead signedIn current="ask" />
       <AskView />
     </>
   );

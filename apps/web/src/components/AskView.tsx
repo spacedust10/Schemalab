@@ -1,12 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { pickChart } from "@/lib/chart";
 import { errorText } from "@/lib/post";
 import { createSSEParser } from "@/lib/sse";
 import { takeaway } from "@/lib/takeaway";
 import { type AgentEvent, type Trace, emptyTrace, reduceTrace } from "@/lib/trace";
+import type { Dataset } from "@/lib/upload";
 import { ConfidenceNote } from "./ConfidenceNote";
 import { Provenance } from "./Provenance";
 import { ResultChart } from "./ResultChart";
@@ -18,6 +20,8 @@ const EXAMPLES = [
   "What was the average tip by payment type?",
   "How did the share of uninsured Michigan residents change by year?",
 ];
+
+type Source = "sample" | "mine";
 
 const RECOVERY: Record<string, string> = {
   model: "Check that Ollama is running (ollama serve) and the model is pulled.",
@@ -34,6 +38,15 @@ export function AskView() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
+  const [source, setSource] = useState<Source>("sample");
+  const [uploads, setUploads] = useState<Dataset[]>([]);
+
+  useEffect(() => {
+    fetch("/api/datasets")
+      .then((res) => (res.ok ? (res.json() as Promise<Dataset[]>) : []))
+      .then(setUploads)
+      .catch(() => setUploads([]));
+  }, []);
 
   async function ask(q: string) {
     const text = q.trim();
@@ -48,7 +61,7 @@ export function AskView() {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, dataset: source }),
         signal: abort.current.signal,
       });
       if (res.status === 401) {
@@ -85,14 +98,45 @@ export function AskView() {
             void ask(question);
           }}
         >
+          <fieldset className="source">
+            <legend>Ask about</legend>
+            <label>
+              <input
+                type="radio"
+                name="source"
+                checked={source === "sample"}
+                onChange={() => setSource("sample")}
+              />
+              Sample data
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="source"
+                checked={source === "mine"}
+                disabled={uploads.length === 0}
+                onChange={() => setSource("mine")}
+              />
+              Your tables{uploads.length ? ` (${uploads.length})` : ""}
+            </label>
+            {uploads.length === 0 && (
+              <Link href="/data" prefetch={false}>
+                Upload a file
+              </Link>
+            )}
+          </fieldset>
           <div className="field">
-            <label htmlFor="q">Ask about the sample data</label>
+            <label htmlFor="q">Your question</label>
             <textarea
               id="q"
               rows={2}
               maxLength={2000}
               value={question}
-              placeholder="Which pickup borough had the most taxi trips?"
+              placeholder={
+                source === "mine"
+                  ? `For example: how many rows does ${uploads[0]?.name ?? "my table"} have?`
+                  : "Which pickup borough had the most taxi trips?"
+              }
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -106,7 +150,7 @@ export function AskView() {
             {busy ? "Working…" : "Ask"}
           </button>
         </form>
-        {!asked && (
+        {!asked && source === "sample" && (
           <div className="examples" aria-label="Example questions">
             {EXAMPLES.map((ex) => (
               <button
@@ -182,7 +226,7 @@ function EmptyState() {
       <h1>Ask in plain English.</h1>
       <p>
         The analyst plans a query, writes SQL, checks it against a safety guard, runs it on the
-        sample data and reviews it against your question. Every step shows up on the right as it
+        data you picked and reviews it against your question. Every step shows up on the right as it
         happens. The model sees table and column names only, never your rows.
       </p>
     </div>

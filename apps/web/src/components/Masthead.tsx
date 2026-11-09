@@ -1,14 +1,28 @@
 import Link from "next/link";
 import { SignOut } from "./SignOut";
 
-export function Masthead({ signedIn = false }: { signedIn?: boolean }) {
+type Page = "ask" | "data";
+
+export function Masthead({ signedIn = false, current }: { signedIn?: boolean; current?: Page }) {
   return (
     <header className="masthead">
       {/* No prefetch: on the sign-in page it would cache / as a redirect back to /login. */}
       <Link className="wordmark" href="/" prefetch={false}>
         Schemalab<small>database lab</small>
       </Link>
-      {signedIn && <SignOut />}
+      {signedIn && (
+        <div className="masthead-end">
+          <nav aria-label="Main" className="nav">
+            <Link href="/" prefetch={false} aria-current={current === "ask" ? "page" : undefined}>
+              Ask
+            </Link>
+            <Link href="/data" prefetch={false} aria-current={current === "data" ? "page" : undefined}>
+              Your data
+            </Link>
+          </nav>
+          <SignOut />
+        </div>
+      )}
     </header>
   );
 }
