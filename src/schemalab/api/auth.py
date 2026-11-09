@@ -1,7 +1,7 @@
 """Accounts: register, login, logout, and the current-user dependency."""
 
 import re
-from functools import lru_cache
+import threading
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -40,9 +40,17 @@ class TokenResponse(BaseModel):
     token: str
 
 
-@lru_cache
+_engines: dict[str, Engine] = {}
+_engines_lock = threading.Lock()
+
+
 def _engine_for(url: str) -> Engine:
-    return store.make_engine(url)
+    # A lock, not lru_cache: concurrent first requests each ran create_all, and Postgres
+    # refused the duplicate CREATE TABLE.
+    with _engines_lock:
+        if url not in _engines:
+            _engines[url] = store.make_engine(url)
+        return _engines[url]
 
 
 def get_engine() -> Engine:

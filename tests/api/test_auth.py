@@ -209,3 +209,31 @@ def test_success_clears_failures_from_every_address(
         login(from_ip(app, "203.0.113.9"), "wrong password!")
     assert login(from_ip(app, "198.51.100.4"), PASSWORD) == 200
     assert stored_attempts(engine) == 0
+
+
+def test_engine_is_created_once_under_concurrent_first_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Live bug: the first requests after a start each ran create_all at once, and Postgres
+    # refused the duplicate CREATE TABLE with a 500.
+    import threading
+    import time
+
+    from schemalab.api import auth
+
+    calls = 0
+
+    def slow_make_engine(url: str) -> object:
+        nonlocal calls
+        calls += 1
+        time.sleep(0.05)
+        return object()
+
+    monkeypatch.setattr(auth.store, "make_engine", slow_make_engine)
+    url = "sqlite:///concurrency-check.db"
+    threads = [threading.Thread(target=auth._engine_for, args=(url,)) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert calls == 1
