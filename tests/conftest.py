@@ -30,12 +30,14 @@ def engine(tmp_path: Path) -> Iterator[Engine]:
 
 
 @pytest.fixture
-def app(engine: Engine, sample_db: Path) -> FastAPI:
+def app(engine: Engine, sample_db: Path, tmp_path: Path) -> FastAPI:
+    from schemalab.api.datasets import get_uploads_dir
     from schemalab.api.main import create_app, get_db_path, get_engine
 
     application = create_app()
     application.dependency_overrides[get_engine] = lambda: engine
     application.dependency_overrides[get_db_path] = lambda: sample_db
+    application.dependency_overrides[get_uploads_dir] = lambda: tmp_path / "uploads"
     return application
 
 

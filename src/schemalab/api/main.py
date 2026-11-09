@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +17,8 @@ from schemalab.agent.graph import run_agent
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
 from schemalab.api.corrections import router as corrections_router
+from schemalab.api.datasets import UploadsDir, user_db
+from schemalab.api.datasets import router as datasets_router
 from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, NoModelsError, gateway_from_settings
 
@@ -27,6 +29,8 @@ class AskRequest(BaseModel):
     question: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
     ]
+    # "sample": the built-in datasets. "mine": the caller's uploaded tables.
+    dataset: Literal["sample", "mine"] = "sample"
 
 
 def get_db_path() -> Path:
@@ -68,6 +72,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(corrections_router)
+    app.include_router(datasets_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -78,10 +83,15 @@ def create_app() -> FastAPI:
         user: UserDep,  # first, so no other dependency runs for an anonymous request
         body: AskRequest,
         db_path: Annotated[Path, Depends(get_db_path)],
+        uploads_dir: UploadsDir,
         gateway: Annotated[Gateway, Depends(get_gateway)],
         settings: Annotated[Settings, Depends(get_settings)],
         engine: Annotated[Engine, Depends(get_engine)],
     ) -> StreamingResponse:
+        if body.dataset == "mine":
+            db_path = user_db(uploads_dir, user)
+            if not db_path.exists():
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a file first.")
         with engine.connect() as conn:
             notes = [c["text"] for c in store.list_corrections(conn, user["id"])]
 
