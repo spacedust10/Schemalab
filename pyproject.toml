@@ -1,6 +1,6 @@
 [project]
 name = "schemalab"
-version = "0.0.1"
+version = "0.1.0"
 description = "Database learning lab and AI data analyst on free, local LLMs"
 readme = "README.md"
 license = "Apache-2.0"

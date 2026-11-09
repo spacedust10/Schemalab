@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-09)
 
 The first release: a safe core and an AI data analyst on free, local models.
 
