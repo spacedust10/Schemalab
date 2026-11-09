@@ -1,8 +1,10 @@
 """The analyst as a LangGraph state machine.
 
-    schema -> plan -> write_sql -> run --ok--> critic --ok--> answer
-                          ^         |             |
-                          +--error--+--objection--+   (up to MAX_ATTEMPTS)
+    schema -> plan -> write_sql -> run --rows--> critic --> answer
+                          ^         |               |
+                          +--error--+---no rows-----+   (up to MAX_ATTEMPTS)
+
+The critic's verdict sets the confidence; an objection does not trigger a rewrite (#24).
 
 Every node reports what it did through the stream writer, so `/ask` can show each step as
 it happens. Model prompts carry the schema and the agent's own SQL, never row values.
@@ -44,6 +46,7 @@ class State(TypedDict, total=False):
     problem: str | None  # why the latest attempt must be redone
     result: QueryResult | None
     verdict: bool | None  # critic: True ok, False objected, None no usable verdict
+    empty: bool  # the latest result had no rows, which is retried without the critic's model
     failed: bool
 
 
@@ -180,14 +183,14 @@ def _build(
             # No model needed: an empty result is suspicious enough to try again.
             issue: str | None = "The query returned no rows; check the filters and joins."
             writer({"step": "critic", "ok": False, "issue": issue, "attempt": attempt})
-            return {"verdict": False, "problem": issue}
+            return {"verdict": False, "problem": issue, "empty": True}
 
         reply = ask_model([{"role": "user", "content": prompt}])
         if reply is None:
             return {"failed": True}
         ok, issue = _parse_verdict(reply.text)
         writer({"step": "critic", "ok": ok, "issue": issue, "attempt": attempt, **_usage(reply)})
-        return {"verdict": ok, "problem": issue if ok is False else None}
+        return {"verdict": ok, "problem": issue if ok is False else None, "empty": False}
 
     def answer(state: State) -> State:
         result = state.get("result")
@@ -239,7 +242,10 @@ def _build(
     def after_critic(state: State) -> str:
         if state.get("failed"):
             return END
-        retry = state.get("verdict") is False and state["attempt"] < MAX_ATTEMPTS
+        # The critic judges and does not rewrite (#24): in the eval its rewrites fixed no
+        # answer and broke two, while its verdict was a good confidence signal. An empty
+        # result is still retried, since that check involves no model.
+        retry = state.get("empty") and state["attempt"] < MAX_ATTEMPTS
         return "write_sql" if retry else "answer"
 
     def after_model(next_node: str) -> Any:

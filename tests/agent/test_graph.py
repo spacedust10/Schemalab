@@ -77,24 +77,18 @@ def test_model_outage_ends_with_an_error(sample_db: Path) -> None:
 ISSUE = '{"ok": false, "issue": "Groups by date, but the question only asks per customer."}'
 
 
-def test_critic_objection_is_fed_back_and_retried(sample_db: Path) -> None:
-    gw = ScriptedGateway(PLAN, GOOD_SQL, ISSUE, GOOD_SQL, OK)
+def test_critic_objection_lowers_confidence_without_a_rewrite(sample_db: Path) -> None:
+    # #24: across 54 eval questions the critic's rewrites fixed no answer and broke two right
+    # ones, while its verdict separated right from wrong answers well. So it judges only.
+    gw = ScriptedGateway(PLAN, GOOD_SQL, ISSUE)
     events = run(sample_db, gw)
-    assert steps(events) == [
-        "schema",
-        "plan",
-        "sql",
-        "result",
-        "critic",
-        "sql",
-        "result",
-        "critic",
-        "answer",
-    ]
-    first = events[4]
-    assert first["ok"] is False and "per customer" in first["issue"] and first["attempt"] == 1
-    assert "per customer" in gw.prompt(3)  # the rewrite sees the critic's issue
-    assert events[7]["ok"] is True
+    assert steps(events) == ["schema", "plan", "sql", "result", "critic", "answer"]
+    assert events[4]["ok"] is False and "per customer" in events[4]["issue"]
+    answer = events[-1]
+    assert answer["confidence"]["label"] == "low"
+    assert any("per customer" in r for r in answer["confidence"]["reasons"])
+    assert answer["provenance"]["attempts"] == 1
+    assert gw.replies == []
 
 
 def test_critic_never_sees_row_values(sample_db: Path) -> None:
@@ -123,13 +117,6 @@ def test_empty_result_is_retried_without_asking_the_critic(sample_db: Path) -> N
     ]
     assert events[4]["ok"] is False and "no rows" in events[4]["issue"]
     assert "model" not in events[4]  # decided without a model call
-
-
-def test_persistent_objection_still_answers(sample_db: Path) -> None:
-    gw = ScriptedGateway(PLAN, GOOD_SQL, ISSUE, GOOD_SQL, ISSUE, GOOD_SQL, ISSUE)
-    events = run(sample_db, gw)
-    assert steps(events)[-2:] == ["critic", "answer"]
-    assert events[-2]["ok"] is False and events[-2]["attempt"] == 3
 
 
 def test_unreadable_critic_reply_counts_as_no_verdict(sample_db: Path) -> None:

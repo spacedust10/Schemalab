@@ -229,7 +229,10 @@ function statusLine(t: Trace): string {
   if (!last) return "Writing SQL…";
   if (last.status !== "ran") return `Attempt ${last.n} was rejected; writing another…`;
   if (!last.critic) return `Attempt ${last.n} ran; reviewing it against the question…`;
-  return last.critic.ok === false ? "The reviewer objected; writing another attempt…" : "Writing the answer…";
+  // Only an empty result is retried; an objection lowers the confidence instead (#24).
+  return last.critic.ok === false && last.rows?.length === 0
+    ? "The query returned no rows; writing another attempt…"
+    : "Writing the answer…";
 }
 
 function EmptyState() {

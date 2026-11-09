@@ -31,7 +31,7 @@ def confidence(
     if not reviewed:
         lower("medium", "the reviewer was off")
     elif verdict is False:
-        lower("low", f"the reviewer still objected: {issue}")
+        lower("low", f"the reviewer objected: {issue}")
     elif verdict is None:
         lower("medium", "the reviewer gave no verdict")
     if row_count == 0:
