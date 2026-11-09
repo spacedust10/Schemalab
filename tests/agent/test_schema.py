@@ -52,3 +52,42 @@ def test_column_notes_tell_the_model_how_tables_join(db: Path) -> None:
     with duckdb.connect(str(db)) as con:
         con.execute("COMMENT ON COLUMN patients.id IS 'references clinics(clinic_id)'")
     assert "  id INTEGER -- references clinics(clinic_id)" in describe_schema(db)
+
+
+@pytest.fixture
+def survey(tmp_path: Path) -> Path:
+    path = tmp_path / "survey.duckdb"
+    with duckdb.connect(str(path)) as con:
+        con.execute("CREATE TABLE answers (id INTEGER, sex VARCHAR, county VARCHAR, note VARCHAR)")
+        con.execute(
+            "INSERT INTO answers SELECT i,"
+            " CASE WHEN i % 2 = 0 THEN 'Male Only' ELSE 'Both Sexes' END,"
+            " CASE WHEN i % 3 = 0 THEN 'O''Brien County' ELSE 'Kent County, MI' END,"
+            " 'free text ' || i FROM range(300) t(i)"
+        )
+    return path
+
+
+def test_category_values_are_off_by_default(survey: Path) -> None:
+    text = describe_schema(survey)
+    assert "Male Only" not in text and "Kent County" not in text
+
+
+def test_category_values_list_short_text_columns_as_sql_literals(survey: Path) -> None:
+    text = describe_schema(survey, categories=True)
+    assert "  sex VARCHAR -- values: 'Both Sexes', 'Male Only'" in text
+    # Quotes are doubled so the model can copy a value straight into SQL.
+    assert "  county VARCHAR -- values: 'Kent County, MI', 'O''Brien County'" in text
+
+
+def test_category_values_skip_high_cardinality_and_non_text_columns(survey: Path) -> None:
+    text = describe_schema(survey, categories=True)
+    assert "free text" not in text  # 300 distinct values: free text, not a category
+    assert "  id INTEGER\n" in text + "\n"
+
+
+def test_category_values_and_key_notes_share_a_line(survey: Path) -> None:
+    with duckdb.connect(str(survey)) as con:
+        con.execute("COMMENT ON COLUMN answers.sex IS 'references sexes(code)'")
+    text = describe_schema(survey, categories=True)
+    assert "  sex VARCHAR -- references sexes(code); values: 'Both Sexes', 'Male Only'" in text
