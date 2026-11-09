@@ -17,6 +17,8 @@ dependencies = [
     "sqlalchemy>=2.1.8",
     "argon2-cffi>=25.1.0",
     "psycopg[binary]>=3.3.8",
+    "openpyxl>=3.1.5",
+    "defusedxml>=0.7.1",
 ]
 
 [dependency-groups]
@@ -28,6 +30,7 @@ dev = [
     "pytest-cov>=6.0",
     "pyyaml>=6.0.3",
     "ruff>=0.8",
+    "types-openpyxl>=3.1.5.20261017",
     "types-pyyaml>=6.0.12.20261103",
 ]
 
