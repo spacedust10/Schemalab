@@ -160,3 +160,11 @@ def test_delete_unknown_table_changes_nothing(tmp_path: Path, db: Path, name: st
     import_file(db, csv_file(tmp_path, "a\n1\n"), "two.csv")
     assert delete_table(db, name) is False
     assert [t["name"] for t in list_tables(db)] == ["two"]
+
+
+def test_excel_is_read_whatever_the_temp_file_is_called(tmp_path: Path, db: Path) -> None:
+    # The API spools uploads to a temp file without an extension; openpyxl checks extensions
+    # on paths, so a real workbook was refused as "not an Excel file".
+    src = xlsx_file(tmp_path, {"Sheet1": [["a"], [1]]})
+    spooled = src.rename(tmp_path / "tmpk2j9x")
+    assert import_file(db, spooled, "budget.xlsx") == ["budget"]

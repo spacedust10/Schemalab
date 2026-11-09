@@ -129,3 +129,16 @@ def test_ask_rejects_unknown_datasets(client: TestClient) -> None:
         "/ask", json={"question": "How many?", "dataset": "../1"}, headers=register(client)
     )
     assert resp.status_code == 422
+
+
+def test_excel_upload_through_the_api(client: TestClient, tmp_path: Any) -> None:
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    wb.active.append(["region", "revenue"])  # type: ignore[union-attr]
+    wb.active.append(["North", 10])  # type: ignore[union-attr]
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+    resp = upload(client, register(client), body=path.read_bytes(), name="Sales.xlsx")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["created"] == ["sales"]

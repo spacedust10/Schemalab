@@ -107,9 +107,14 @@ def _load(
 
 def _excel_to_csv(src: Path, filename: str, work: Path) -> list[tuple[str, Path, bool]]:
     """Write each non-empty sheet to a CSV file. openpyxl parses XML with defusedxml."""
+    # A file object, not the path: openpyxl refuses paths without an Excel extension, and
+    # uploads arrive as extensionless temp files. Read-only mode keeps reading it, so it stays
+    # open until the workbook is closed.
+    fh = src.open("rb")
     try:
-        wb = openpyxl.load_workbook(src, read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(fh, read_only=True, data_only=True)
     except (zipfile.BadZipFile, InvalidFileException, KeyError, OSError):
+        fh.close()
         raise UploadError("This is not an Excel .xlsx file.") from None
     stem = Path(filename).name.rsplit(".", 1)[0]
     sheets: list[tuple[str, Path]] = []
@@ -130,6 +135,7 @@ def _excel_to_csv(src: Path, filename: str, work: Path) -> list[tuple[str, Path,
                 sheets.append((ws.title, out))
     finally:
         wb.close()
+        fh.close()
     if not sheets:
         raise UploadError("The workbook has no data.")
     if len(sheets) == 1:
