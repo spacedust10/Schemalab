@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { pickChart } from "@/lib/chart";
 import { errorText } from "@/lib/post";
+import { type Export, notebookName, toIpynb, toMarimo } from "@/lib/notebook";
 import { createSSEParser } from "@/lib/sse";
 import { takeaway } from "@/lib/takeaway";
 import { type AgentEvent, type Trace, emptyTrace, reduceTrace } from "@/lib/trace";
@@ -34,6 +35,7 @@ export function AskView() {
   const router = useRouter();
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
+  const [askedSource, setAskedSource] = useState<Source>("sample");
   const [trace, setTrace] = useState<Trace>(emptyTrace);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -54,6 +56,7 @@ export function AskView() {
     abort.current?.abort();
     abort.current = new AbortController();
     setAsked(text);
+    setAskedSource(source);
     setTrace(emptyTrace);
     setFailure(null);
     setBusy(true);
@@ -195,6 +198,15 @@ export function AskView() {
               <p className="answer-text">{trace.answer.text}</p>
             )}
             <ConfidenceNote confidence={trace.answer.confidence} />
+            <NotebookLinks
+              notebook={{
+                question: asked ?? "",
+                headline: headline ?? trace.answer.text,
+                confidence: trace.answer.confidence.label,
+                sql: trace.answer.provenance.sql,
+                dataset: askedSource,
+              }}
+            />
           </>
         )}
         {spec && trace.result && trace.done && <ResultChart spec={spec} />}
@@ -230,5 +242,27 @@ function EmptyState() {
         happens. The model sees table and column names only, never your rows.
       </p>
     </div>
+  );
+}
+
+function NotebookLinks({ notebook }: { notebook: Export }) {
+  const save = (text: string, ext: "ipynb" | "py", type: string) => {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = notebookName(notebook.question, ext);
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <p className="exports">
+      <span>Re-run it yourself:</span>
+      <button type="button" className="button quiet" onClick={() => save(toIpynb(notebook), "ipynb", "application/x-ipynb+json")}>
+        Jupyter notebook
+      </button>
+      <button type="button" className="button quiet" onClick={() => save(toMarimo(notebook), "py", "text/x-python")}>
+        marimo notebook
+      </button>
+    </p>
   );
 }
