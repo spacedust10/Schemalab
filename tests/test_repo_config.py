@@ -22,6 +22,13 @@ def test_compose_ports_bind_to_localhost_only() -> None:
     assert exposed == []
 
 
+def test_compose_keeps_postgres_off_the_host() -> None:
+    # Only the API needs Postgres, over the Compose network. Publishing 5432
+    # clashes with a local Postgres and stops `docker compose up` from starting.
+    postgres = load("docker-compose.yml")["services"]["postgres"]
+    assert "ports" not in postgres
+
+
 def test_dependabot_watches_every_ecosystem() -> None:
     # Nothing flagged the vulnerable Next.js on Day 1; every lockfile needs a watcher.
     updates = load(".github/dependabot.yml")["updates"]

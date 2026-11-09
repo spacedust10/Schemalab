@@ -46,7 +46,7 @@ docker compose up
 - Web UI: http://localhost:3000
 - API docs: http://localhost:8000/docs
 
-If ports 3000, 8000 or 5432 are already in use, set `WEB_PORT`, `API_PORT` or `POSTGRES_PORT` in `.env`. All ports are published on 127.0.0.1 only.
+If ports 3000 or 8000 are already in use, set `WEB_PORT` or `API_PORT` in `.env`. Both are published on 127.0.0.1 only. Postgres is not published, so a local Postgres on 5432 does not clash.
 
 ### Sample data
 
