@@ -13,7 +13,7 @@ Model: `ollama_chat/llama3.1` (8B, local), temperature 0. Same questions, three 
 |---|---|---|---|---|
 | Critic rewrites on objection (before) | 61.1% (33) | 29 | 4 | 14.1 |
 | No critic | 64.8% (35) | 31 | 4 | 7.3 |
-| **Critic judges only (now)** | JUDGE_ACC | JUDGE_T | JUDGE_M | JUDGE_S |
+| **Critic judges only (now)** | **64.8% (35)** | **31** | **4** | **9.3** |
 
 What the critic's rewrites did, compared with no critic: they fixed no answer and broke two right
 ones (t10, t36). In t10 the first query counted trips ending in Manhattan correctly; the critic
@@ -23,11 +23,11 @@ What its verdict is worth, as a confidence signal:
 
 | Label | Rewrites on | Judge only |
 |---|---|---|
-| high (critic agreed on the first attempt) | 93% of 30 | JUDGE_HIGH |
-| medium | 33% of 3 | JUDGE_MEDIUM |
-| low (critic objected, or no rows) | 22% of 18 | JUDGE_LOW |
+| high (critic agreed on the first attempt) | 93% of 30 | 93% of 30 |
+| medium | 33% of 3 | 100% of 1 |
+| low (critic objected, or no rows) | 22% of 18 | 30% of 20 |
 
-Without a critic every answer is capped at medium (79.5% of 44 correct), so the labels say
+Judge only gets every question the same as no critic, right or wrong, and keeps the labels. Without a critic every answer is capped at medium (79.5% of 44 correct), so the labels say
 nothing. Decision: keep the critic as a judge that sets the confidence, and stop it from
 rewriting answers. An empty result is still retried, since that check needs no model.
 
