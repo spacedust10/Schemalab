@@ -71,3 +71,13 @@ def test_api_uses_postgres_through_psycopg3() -> None:
 def test_ci_runs_the_web_unit_tests() -> None:
     steps = load(".github/workflows/ci.yml")["jobs"]["web"]["steps"]
     assert {"run": "npm test"} in steps
+
+
+def test_api_keeps_uploads_in_a_named_volume_it_owns() -> None:
+    # Uploads must survive a rebuild, and the non-root app user must be able to write them.
+    compose = load("docker-compose.yml")
+    assert "uploads:/app/data/uploads" in compose["services"]["api"]["volumes"]
+    assert "uploads" in compose["volumes"]
+    dockerfile = (ROOT / "Dockerfile.api").read_text()
+    assert "chown app /app/data/uploads" in dockerfile
+    assert dockerfile.index("chown app /app/data/uploads") < dockerfile.index("USER app")

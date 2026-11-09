@@ -11,7 +11,8 @@ COPY README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-RUN useradd --create-home --uid 1000 app
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p /app/data/uploads && chown app /app/data/uploads
 USER app
 ENV PATH=/opt/venv/bin:$PATH
 EXPOSE 8000
