@@ -152,3 +152,24 @@ def test_sql_dump_upload_reports_what_was_skipped(client: TestClient) -> None:
     assert body["created"] == ["t"]
     assert body["skipped"] == {"GRANT": 1}
     assert body["tables"][0]["columns"][0]["note"] == "primary key"
+
+
+def test_sample_data_shares_category_values_by_default(app: FastAPI, client: TestClient) -> None:
+    gw = ScriptedGateway("Count.", "SELECT count(*) FROM customers", '{"ok": true}')
+    app.dependency_overrides[get_gateway] = lambda: gw
+    events(client, register(client), {"question": "How many customers?"})
+    assert "values: 'c0'" in gw.prompt(0)
+
+
+def test_uploaded_tables_share_category_values_only_on_request(
+    app: FastAPI, client: TestClient
+) -> None:
+    headers = register(client)
+    upload(client, headers, body=b"region,amount\nNorth,1\nSouth,2\n", name="sales.csv")
+    for opt_in, visible in [(False, False), (True, True)]:
+        gw = ScriptedGateway("Sum.", "SELECT sum(amount) FROM sales", '{"ok": true}')
+        app.dependency_overrides[get_gateway] = (lambda g: lambda: g)(gw)
+        payload = {"question": "Total?", "dataset": "mine", "share_categories": opt_in}
+        got = events(client, headers, payload)
+        assert ("'North'" in gw.prompt(0)) is visible
+        assert got[-1]["provenance"]["categories_shared_with_model"] is visible

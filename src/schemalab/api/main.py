@@ -32,6 +32,8 @@ class AskRequest(BaseModel):
     ]
     # "sample": the built-in datasets. "mine": the caller's uploaded tables.
     dataset: Literal["sample", "mine"] = "sample"
+    # For "mine": let the model see the distinct values of short text columns.
+    share_categories: bool = False
 
 
 def get_gateway(settings: Annotated[Settings, Depends(get_settings)]) -> Gateway:
@@ -107,6 +109,11 @@ def create_app() -> FastAPI:
                     gateway,
                     share_results=settings.share_results_with_model,
                     notes=notes,
+                    categories=(
+                        settings.share_sample_categories
+                        if body.dataset == "sample"
+                        else body.share_categories
+                    ),
                 ),
                 on_done=save,
             ),

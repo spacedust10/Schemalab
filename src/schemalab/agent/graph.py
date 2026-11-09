@@ -57,11 +57,13 @@ def run_agent(
     share_results: bool = False,
     notes: Sequence[str] = (),
     critic: bool = True,
+    categories: bool = False,
 ) -> Iterator[Event]:
     """Stream the analyst's events. Result rows reach the model only if `share_results`.
 
     `notes` are the asking user's corrections, added to the planner, writer and critic.
-    `critic=False` skips the reviewer, for measuring what it adds (#24).
+    `critic=False` skips the reviewer, for measuring what it adds (#24). `categories` lets the
+    model see the distinct values of short text columns, so it can spell filters right.
     """
     if not _has_tables(db_path):
         yield {
@@ -71,12 +73,19 @@ def run_agent(
             "uv run python -m schemalab.datasets",
         }
         return
-    graph = _build(db_path, gateway, share_results, prompts.notes_block(list(notes)), critic)
+    graph = _build(
+        db_path, gateway, share_results, prompts.notes_block(list(notes)), critic, categories
+    )
     yield from graph.stream({"question": question, "attempt": 0}, stream_mode="custom")
 
 
 def _build(
-    db_path: Path, gateway: Gateway, share_results: bool, notes: str, use_critic: bool
+    db_path: Path,
+    gateway: Gateway,
+    share_results: bool,
+    notes: str,
+    use_critic: bool,
+    categories: bool,
 ) -> Any:
     models_used: list[str] = []  # the graph is built per question, so this is per run
 
@@ -91,7 +100,7 @@ def _build(
             return None
 
     def schema(state: State) -> State:
-        text = describe_schema(db_path)
+        text = describe_schema(db_path, categories=categories)
         get_stream_writer()({"step": "schema", "tables": text.count(" rows)")})
         return {"schema": text}
 
@@ -234,6 +243,7 @@ def _build(
                     "attempts": state["attempt"],
                     "models": models_used,
                     "results_shared_with_model": share_results,
+                    "categories_shared_with_model": categories,
                 },
             }
         )

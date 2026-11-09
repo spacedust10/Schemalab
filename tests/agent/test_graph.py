@@ -241,3 +241,16 @@ def test_critic_can_be_switched_off(sample_db: Path) -> None:
     assert steps(events) == ["schema", "plan", "sql", "result", "answer"]
     assert gw.replies == []
     assert "the reviewer was off" in events[-1]["confidence"]["reasons"]
+
+
+def test_category_values_reach_the_model_only_when_allowed(sample_db: Path) -> None:
+    hidden = ScriptedGateway(PLAN, GOOD_SQL, OK)
+    answer = list(run_agent("How many orders?", sample_db, hidden))[-1]
+    assert "'c1'" not in hidden.prompt(0)
+    assert answer["provenance"]["categories_shared_with_model"] is False
+
+    shown = ScriptedGateway(PLAN, GOOD_SQL, OK)
+    answer = list(run_agent("How many orders?", sample_db, shown, categories=True))[-1]
+    assert "name VARCHAR -- values: 'c0', 'c1'" in shown.prompt(0)
+    assert "name VARCHAR -- values:" in shown.prompt(1)  # the SQL writer sees them too
+    assert answer["provenance"]["categories_shared_with_model"] is True

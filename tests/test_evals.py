@@ -112,3 +112,9 @@ def test_summarize_reports_accuracy_per_confidence_label() -> None:
         "medium": {"n": 1, "accuracy": 1.0},
         "none": {"n": 1, "accuracy": 0.0},
     }
+
+
+def test_run_case_can_share_category_values(sample_db: Path) -> None:
+    gw = ScriptedGateway("Count.", "SELECT count(*) FROM orders", '{"ok": true}')
+    run_case(CASE, sample_db, gw, categories=True)
+    assert "values: 'c0'" in gw.prompt(0)

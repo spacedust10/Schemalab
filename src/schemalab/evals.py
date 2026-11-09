@@ -1,7 +1,7 @@
 """Eval harness: how often the analyst's answer matches a reference query's result.
 
-    uv run python -m schemalab.evals                     # all cases, critic on and off
-    uv run python -m schemalab.evals --critic off --limit 10
+    uv run python -m schemalab.evals                     # all cases, as the app runs them
+    uv run python -m schemalab.evals --critic both --categories off --limit 10
     SCHEMALAB_MODELS='["groq/openai/gpt-oss-120b"]' uv run python -m schemalab.evals
 
 Scoring is execution accuracy: run the reference SQL and the agent's final query and compare
@@ -87,9 +87,11 @@ def same_result(expected: Sequence[Sequence[Any]], got: Sequence[Sequence[Any]])
     return Counter(want) == Counter(tuple(row[i] for i in used) for row in have)
 
 
-def run_case(case: Case, db: Path, gateway: Gateway, critic: bool = True) -> dict[str, Any]:
+def run_case(
+    case: Case, db: Path, gateway: Gateway, critic: bool = True, categories: bool = False
+) -> dict[str, Any]:
     start = time.perf_counter()
-    events = list(run_agent(case.question, db, gateway, critic=critic))
+    events = list(run_agent(case.question, db, gateway, critic=critic, categories=categories))
     seconds = round(time.perf_counter() - start, 1)
     final = events[-1] if events else {}
     rows = next((e["rows"] for e in reversed(events) if e["step"] == "result"), None)
@@ -123,7 +125,8 @@ def summarize(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--critic", choices=["on", "off", "both"], default="both")
+    parser.add_argument("--critic", choices=["on", "off", "both"], default="on")
+    parser.add_argument("--categories", choices=["on", "off"], default="on")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--ids", nargs="*", default=None)
     parser.add_argument("--out", type=Path, default=ROOT / "evals" / "results")
@@ -135,22 +138,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     cases = [c for c in load_cases() if not args.ids or c.id in args.ids][: args.limit]
     args.out.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
+    models = "-".join(gateway.models).replace("/", "_")
     for variant in ["on", "off"] if args.critic == "both" else [args.critic]:
-        path = args.out / f"{stamp}-{'-'.join(gateway.models)}-critic-{variant}.jsonl".replace(
-            "/", "_"
-        )
+        path = args.out / f"{stamp}-{models}-critic-{variant}-categories-{args.categories}.jsonl"
         records = []
         with path.open("w") as f:
             for case in cases:
-                record = run_case(case, db, gateway, critic=variant == "on")
+                record = run_case(
+                    case, db, gateway, critic=variant == "on", categories=args.categories == "on"
+                )
                 records.append(record)
                 f.write(json.dumps(record) + "\n")
                 f.flush()
                 mark = "ok  " if record["correct"] else "MISS"
-                print(
-                    f"[critic {variant}] {mark} {case.id:<6} {record['label'] or record['error']}"
-                )
-        print(json.dumps({"critic": variant, "models": gateway.models, **summarize(records)}))
+                outcome = record["label"] or record["error"]
+                print(f"[critic {variant}] {mark} {case.id:<6} {outcome}", flush=True)
+        info = {"critic": variant, "categories": args.categories, "models": gateway.models}
+        print(json.dumps({**info, **summarize(records)}), flush=True)
 
 
 if __name__ == "__main__":
