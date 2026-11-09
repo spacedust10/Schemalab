@@ -23,6 +23,8 @@ from openpyxl.utils.exceptions import InvalidFileException
 from schemalab.guards.engine import open_readonly
 
 MAX_BYTES = 50 * 1024 * 1024
+# A zipped .xlsx can expand far past MAX_BYTES; this caps the CSV it unpacks to.
+MAX_UNPACKED_BYTES = 4 * MAX_BYTES
 MAX_TABLES = 20
 MAX_COLUMNS = 500
 SUFFIXES = (".csv", ".xlsx")
@@ -124,12 +126,15 @@ def _excel_to_csv(src: Path, filename: str, work: Path) -> list[tuple[str, Path,
             with out.open("w", newline="") as f:
                 writer = csv.writer(f)
                 wrote = False
+                size = 0
                 for row in ws.iter_rows(values_only=True):
                     if all(v is None for v in row):
                         continue
                     if len(row) > MAX_COLUMNS:
                         raise UploadError(f"A table can have at most {MAX_COLUMNS} columns.")
-                    writer.writerow([_cell(v) for v in row])
+                    size += writer.writerow([_cell(v) for v in row])
+                    if size > MAX_UNPACKED_BYTES:
+                        raise UploadError("This workbook is too large once unpacked.")
                     wrote = True
             if wrote:
                 sheets.append((ws.title, out))

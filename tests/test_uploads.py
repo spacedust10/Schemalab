@@ -168,3 +168,19 @@ def test_excel_is_read_whatever_the_temp_file_is_called(tmp_path: Path, db: Path
     src = xlsx_file(tmp_path, {"Sheet1": [["a"], [1]]})
     spooled = src.rename(tmp_path / "tmpk2j9x")
     assert import_file(db, spooled, "budget.xlsx") == ["budget"]
+
+
+def test_excel_xml_is_parsed_with_defusedxml() -> None:
+    # openpyxl only defends against entity-expansion attacks when defusedxml is installed.
+    assert openpyxl.DEFUSEDXML is True
+
+
+def test_workbook_that_unpacks_too_large_is_refused(
+    tmp_path: Path, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A zip-compressed sheet can expand far past the upload limit; cap what reaches disk.
+    monkeypatch.setattr("schemalab.uploads.MAX_UNPACKED_BYTES", 1000)
+    src = xlsx_file(tmp_path, {"Big": [["text"]] + [["x" * 50] for _ in range(100)]})
+    with pytest.raises(UploadError, match="too large once unpacked"):
+        import_file(db, src, "big.xlsx")
+    assert list_tables(db) == []
