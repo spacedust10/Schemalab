@@ -37,3 +37,6 @@ data/demo_login.json
 
 # User uploads (one DuckDB file per user)
 data/uploads/
+
+# Eval run records (summaries go in evals/RESULTS.md)
+evals/results/

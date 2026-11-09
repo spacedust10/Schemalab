@@ -1,0 +1,322 @@
+# Eval questions over the sample data, each with a reference query. A case is correct when the
+# analyst's final result matches the reference result (see src/schemalab/evals.py for the rules).
+# Tags: count, aggregate, group, join, filter, rank, time, domain (needs a code explained).
+
+# NYC taxi, January 2024
+- id: t01
+  question: How many taxi trips are there?
+  sql: SELECT count(*) FROM taxi_trips
+  tags: [count]
+- id: t02
+  question: What is the average fare amount?
+  sql: SELECT avg(fare_amount) FROM taxi_trips
+  tags: [aggregate]
+- id: t03
+  question: What is the total of all tips?
+  sql: SELECT sum(tip_amount) FROM taxi_trips
+  tags: [aggregate]
+- id: t04
+  question: How many trips had more than 2 passengers?
+  sql: SELECT count(*) FROM taxi_trips WHERE passenger_count > 2
+  tags: [count, filter]
+- id: t05
+  question: What is the longest trip distance?
+  sql: SELECT max(trip_distance) FROM taxi_trips
+  tags: [aggregate]
+- id: t06
+  question: How many trips were there for each payment type?
+  sql: SELECT payment_type, count(*) FROM taxi_trips GROUP BY payment_type
+  tags: [group]
+- id: t07
+  question: What was the average tip by payment type?
+  sql: SELECT payment_type, avg(tip_amount) FROM taxi_trips GROUP BY payment_type
+  tags: [group]
+- id: t08
+  question: Which pickup borough had the most taxi trips?
+  sql: |
+    SELECT z.Borough FROM taxi_trips t
+    JOIN taxi_zones z ON t.PULocationID = z.LocationID
+    GROUP BY z.Borough ORDER BY count(*) DESC LIMIT 1
+  tags: [join, rank]
+- id: t09
+  question: How many taxi trips started in Queens?
+  sql: |
+    SELECT count(*) FROM taxi_trips t JOIN taxi_zones z ON t.PULocationID = z.LocationID
+    WHERE z.Borough = 'Queens'
+  tags: [join, filter]
+- id: t10
+  question: How many trips ended in Manhattan?
+  sql: |
+    SELECT count(*) FROM taxi_trips t JOIN taxi_zones z ON t.DOLocationID = z.LocationID
+    WHERE z.Borough = 'Manhattan'
+  tags: [join, filter]
+- id: t11
+  question: What is the average trip distance for each pickup borough?
+  sql: |
+    SELECT z.Borough, avg(t.trip_distance) FROM taxi_trips t
+    JOIN taxi_zones z ON t.PULocationID = z.LocationID GROUP BY z.Borough
+  tags: [join, group]
+- id: t12
+  question: How many trips were picked up on each day of January 2024?
+  sql: |
+    SELECT CAST(tpep_pickup_datetime AS DATE) AS day, count(*) FROM taxi_trips
+    WHERE tpep_pickup_datetime >= '2024-01-01' AND tpep_pickup_datetime < '2024-02-01'
+    GROUP BY day
+  tags: [time, group]
+- id: t13
+  question: Which hour of the day has the most pickups?
+  sql: |
+    SELECT hour(tpep_pickup_datetime) AS hour FROM taxi_trips
+    GROUP BY hour ORDER BY count(*) DESC LIMIT 1
+  tags: [time, rank]
+- id: t14
+  question: What is the average total amount for trips longer than 10 miles?
+  sql: SELECT avg(total_amount) FROM taxi_trips WHERE trip_distance > 10
+  tags: [aggregate, filter]
+- id: t15
+  question: How many trips had no tip at all (a tip of zero)?
+  sql: SELECT count(*) FROM taxi_trips WHERE tip_amount = 0
+  tags: [count, filter]
+- id: t16
+  question: What is the average passenger count per trip?
+  sql: SELECT avg(passenger_count) FROM taxi_trips
+  tags: [aggregate]
+- id: t17
+  question: Which pickup zone had the most trips?
+  sql: |
+    SELECT z.Zone FROM taxi_trips t
+    JOIN taxi_zones z ON t.PULocationID = z.LocationID
+    GROUP BY z.Zone ORDER BY count(*) DESC LIMIT 1
+  tags: [join, rank]
+- id: t18
+  question: What are the top 5 pickup zones by number of trips?
+  sql: |
+    SELECT z.Zone FROM taxi_trips t
+    JOIN taxi_zones z ON t.PULocationID = z.LocationID
+    GROUP BY z.Zone ORDER BY count(*) DESC LIMIT 5
+  tags: [join, rank]
+- id: t19
+  question: How many different pickup locations appear in the trips?
+  sql: SELECT count(DISTINCT PULocationID) FROM taxi_trips
+  tags: [count]
+- id: t20
+  question: How many trips were dropped off in an airport service zone?
+  sql: |
+    SELECT count(*) FROM taxi_trips t JOIN taxi_zones z ON t.DOLocationID = z.LocationID
+    WHERE z.service_zone = 'Airports'
+  tags: [join, filter]
+- id: t21
+  question: What is the average fare for trips picked up in the JFK Airport zone?
+  sql: |
+    SELECT avg(t.fare_amount) FROM taxi_trips t JOIN taxi_zones z ON t.PULocationID = z.LocationID
+    WHERE z.Zone = 'JFK Airport'
+  tags: [join, filter]
+- id: t22
+  question: What percentage of trips were paid by credit card (payment type 1)?
+  sql: SELECT 100.0 * count(*) FILTER (WHERE payment_type = 1) / count(*) FROM taxi_trips
+  tags: [aggregate, domain]
+- id: t23
+  question: What is the total amount of tolls for each pickup borough?
+  sql: |
+    SELECT z.Borough, sum(t.tolls_amount) FROM taxi_trips t
+    JOIN taxi_zones z ON t.PULocationID = z.LocationID GROUP BY z.Borough
+  tags: [join, group]
+- id: t24
+  question: How many trips have a negative total amount?
+  sql: SELECT count(*) FROM taxi_trips WHERE total_amount < 0
+  tags: [count, filter]
+- id: t25
+  question: How many trips lasted longer than 60 minutes?
+  sql: |
+    SELECT count(*) FROM taxi_trips
+    WHERE tpep_dropoff_datetime - tpep_pickup_datetime > INTERVAL 60 MINUTE
+  tags: [time, filter]
+- id: t26
+  question: How many trips did each vendor have?
+  sql: SELECT VendorID, count(*) FROM taxi_trips GROUP BY VendorID
+  tags: [group]
+- id: t27
+  question: What is the average congestion surcharge for each pickup borough?
+  sql: |
+    SELECT z.Borough, avg(t.congestion_surcharge) FROM taxi_trips t
+    JOIN taxi_zones z ON t.PULocationID = z.LocationID GROUP BY z.Borough
+  tags: [join, group]
+- id: t28
+  question: Which dropoff borough has the highest average tip?
+  sql: |
+    SELECT z.Borough FROM taxi_trips t
+    JOIN taxi_zones z ON t.DOLocationID = z.LocationID
+    GROUP BY z.Borough ORDER BY avg(t.tip_amount) DESC LIMIT 1
+  tags: [join, rank]
+- id: t29
+  question: How many trips have the store and forward flag set to Y?
+  sql: SELECT count(*) FROM taxi_trips WHERE store_and_fwd_flag = 'Y'
+  tags: [count, filter]
+- id: t30
+  question: What is the highest fare amount for a trip picked up in Brooklyn?
+  sql: |
+    SELECT max(t.fare_amount) FROM taxi_trips t JOIN taxi_zones z ON t.PULocationID = z.LocationID
+    WHERE z.Borough = 'Brooklyn'
+  tags: [join, filter]
+- id: t31
+  question: How many trips were picked up in Manhattan and dropped off in Queens?
+  sql: |
+    SELECT count(*) FROM taxi_trips t
+    JOIN taxi_zones pu ON t.PULocationID = pu.LocationID
+    JOIN taxi_zones dz ON t.DOLocationID = dz.LocationID
+    WHERE pu.Borough = 'Manhattan' AND dz.Borough = 'Queens'
+  tags: [join, filter]
+- id: t32
+  question: How many trips started and ended in the same location?
+  sql: SELECT count(*) FROM taxi_trips WHERE PULocationID = DOLocationID
+  tags: [count, filter]
+- id: t33
+  question: What is the total of total_amount for each payment type?
+  sql: SELECT payment_type, sum(total_amount) FROM taxi_trips GROUP BY payment_type
+  tags: [group]
+- id: t34
+  question: How many taxi zones are there in each borough?
+  sql: SELECT Borough, count(*) FROM taxi_zones GROUP BY Borough
+  tags: [group]
+- id: t35
+  question: What is the average trip distance on weekends compared with weekdays?
+  sql: |
+    SELECT avg(trip_distance) FROM taxi_trips GROUP BY dayofweek(tpep_pickup_datetime) IN (0, 6)
+  tags: [time, group]
+- id: t36
+  question: How many trips had a trip distance of zero?
+  sql: SELECT count(*) FROM taxi_trips WHERE trip_distance = 0
+  tags: [count, filter]
+
+# Michigan SAHIE health insurance estimates by county, 2014-2022. Variable codes:
+# PCTUI_PT percent uninsured, NUI_PT number uninsured, NIPR_PT population, PCTIC_PT percent insured.
+- id: m01
+  question: How many counties are in the insurance data?
+  sql: SELECT count(DISTINCT name) FROM mi_insurance
+  tags: [count]
+- id: m02
+  question: Which years does the insurance data cover?
+  sql: SELECT DISTINCT year FROM mi_insurance
+  tags: [group]
+- id: m03
+  question: >-
+    What was the percent uninsured (variable PCTUI_PT) for Wayne County, MI in 2022, for people
+    under 65 years, both sexes, all incomes?
+  sql: |
+    SELECT value FROM mi_insurance WHERE name = 'Wayne County, MI' AND variable = 'PCTUI_PT'
+    AND year = 2022 AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+  tags: [filter, domain]
+- id: m04
+  question: >-
+    Which county had the highest percent uninsured (variable PCTUI_PT) in 2022, for people under
+    65 years, both sexes, all incomes?
+  sql: |
+    SELECT name FROM mi_insurance WHERE variable = 'PCTUI_PT' AND year = 2022
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+    ORDER BY value DESC LIMIT 1
+  tags: [rank, domain]
+- id: m05
+  question: >-
+    What was the average county percent uninsured (variable PCTUI_PT) for each year, for people
+    under 65 years, both sexes, all incomes?
+  sql: |
+    SELECT year, avg(value) FROM mi_insurance WHERE variable = 'PCTUI_PT'
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes' GROUP BY year
+  tags: [group, time, domain]
+- id: m06
+  question: >-
+    What was the total number of uninsured people (variable NUI_PT) across all counties in 2022,
+    for people under 65 years, both sexes, all incomes?
+  sql: |
+    SELECT sum(value) FROM mi_insurance WHERE variable = 'NUI_PT' AND year = 2022
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+  tags: [aggregate, domain]
+- id: m07
+  question: >-
+    What was the percent uninsured (variable PCTUI_PT) in Washtenaw County, MI for each year, for
+    people under 65 years, both sexes, all incomes?
+  sql: |
+    SELECT year, value FROM mi_insurance WHERE name = 'Washtenaw County, MI'
+    AND variable = 'PCTUI_PT' AND age = 'Under 65 years' AND sex = 'Both Sexes'
+    AND income = 'All Incomes'
+  tags: [time, filter, domain]
+- id: m08
+  question: >-
+    Which county had the lowest percent uninsured (variable PCTUI_PT) in 2014, for people under 65
+    years, both sexes, all incomes?
+  sql: |
+    SELECT name FROM mi_insurance WHERE variable = 'PCTUI_PT' AND year = 2014
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+    ORDER BY value ASC LIMIT 1
+  tags: [rank, domain]
+- id: m09
+  question: >-
+    In 2022, what was the average county percent uninsured (variable PCTUI_PT) for males only and
+    for females only, for people under 65 years, all incomes?
+  sql: |
+    SELECT sex, avg(value) FROM mi_insurance WHERE variable = 'PCTUI_PT' AND year = 2022
+    AND age = 'Under 65 years' AND income = 'All Incomes'
+    AND sex IN ('Male Only', 'Female Only') GROUP BY sex
+  tags: [group, domain]
+- id: m10
+  question: >-
+    In 2022, what was the average county percent uninsured (variable PCTUI_PT) for each income
+    group, for people under 65 years, both sexes?
+  sql: |
+    SELECT income, avg(value) FROM mi_insurance WHERE variable = 'PCTUI_PT' AND year = 2022
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' GROUP BY income
+  tags: [group, domain]
+- id: m11
+  question: How many rows does the insurance table have for each variable?
+  sql: SELECT variable, count(*) FROM mi_insurance GROUP BY variable
+  tags: [group]
+- id: m12
+  question: >-
+    What was the population (variable NIPR_PT) of Kent County, MI in 2020, for people under 65
+    years, both sexes, all incomes?
+  sql: |
+    SELECT value FROM mi_insurance WHERE name = 'Kent County, MI' AND variable = 'NIPR_PT'
+    AND year = 2020 AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+  tags: [filter, domain]
+- id: m13
+  question: >-
+    How many counties had a percent uninsured (variable PCTUI_PT) above 10 in 2022, for people
+    under 65 years, both sexes, all incomes?
+  sql: |
+    SELECT count(*) FROM mi_insurance WHERE variable = 'PCTUI_PT' AND year = 2022 AND value > 10
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+  tags: [count, filter, domain]
+- id: m14
+  question: >-
+    In 2022, what was the average county percent uninsured (variable PCTUI_PT) for each age group,
+    for both sexes and all incomes?
+  sql: |
+    SELECT age, avg(value) FROM mi_insurance WHERE variable = 'PCTUI_PT' AND year = 2022
+    AND sex = 'Both Sexes' AND income = 'All Incomes' GROUP BY age
+  tags: [group, domain]
+- id: m15
+  question: >-
+    Which county had the most uninsured people (variable NUI_PT) in 2018, for people under 65
+    years, both sexes, all incomes?
+  sql: |
+    SELECT name FROM mi_insurance WHERE variable = 'NUI_PT' AND year = 2018
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+    ORDER BY value DESC LIMIT 1
+  tags: [rank, domain]
+- id: m16
+  question: How many different age groups does the insurance data have?
+  sql: SELECT count(DISTINCT age) FROM mi_insurance
+  tags: [count]
+- id: m17
+  question: >-
+    By how many percentage points did the percent uninsured (variable PCTUI_PT) in Wayne County,
+    MI change from 2014 to 2022, for people under 65 years, both sexes, all incomes?
+  sql: |
+    SELECT max(value) FILTER (WHERE year = 2022) - max(value) FILTER (WHERE year = 2014)
+    FROM mi_insurance WHERE name = 'Wayne County, MI' AND variable = 'PCTUI_PT'
+    AND age = 'Under 65 years' AND sex = 'Both Sexes' AND income = 'All Incomes'
+  tags: [time, domain]
+- id: m18
+  question: What are the different sex categories in the insurance data?
+  sql: SELECT DISTINCT sex FROM mi_insurance
+  tags: [group]
