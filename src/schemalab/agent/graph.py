@@ -151,7 +151,12 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool, notes: str) -> 
         writer({"step": "retry", **failure, "attempt": attempt})
         # The user sees the full error; the model gets it with data values removed, since
         # database errors can quote cell contents ("Could not convert string 'x' ...").
-        return {"problem": redact_values(message) if stage == "run" else message, "result": None}
+        problem = redact_values(message) if stage == "run" else message
+        if message.startswith("Binder Error"):
+            # DuckDB's hint names one near match; models repeat a made-up column without the list.
+            problem += "\n\nThe tables this query reads have only these columns:\n\n"
+            problem += describe_schema(db_path, tables_read(sql))
+        return {"problem": problem, "result": None}
 
     def critic(state: State) -> State:
         result = state.get("result")

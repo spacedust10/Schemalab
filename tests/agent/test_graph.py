@@ -223,3 +223,25 @@ def test_database_without_tables_says_how_to_build_it(tmp_path: Path) -> None:
     duckdb.connect(str(db)).close()
     events = list(run_agent("?", db, ScriptedGateway()))
     assert steps(events) == ["error"] and events[0]["stage"] == "data"
+
+
+def test_prompts_forbid_filters_the_question_does_not_ask_for(sample_db: Path) -> None:
+    # Live run: "Which borough had the most trips?" came back with WHERE passenger_count > 1,
+    # and the critic approved it at high confidence.
+    gw = ScriptedGateway(PLAN, GOOD_SQL, OK)
+    run(sample_db, gw)
+    plan, write_sql, critic = gw.prompt(0), gw.prompt(1), gw.prompt(2)
+    for prompt in (plan, write_sql):
+        assert "Add no filter the question does not ask for" in prompt
+    assert "a filter the question does not ask for" in critic
+
+
+def test_unknown_column_retry_lists_the_real_columns(sample_db: Path) -> None:
+    # Live run: llama3.1 wrote COUNT(tt.TripID) three times; DuckDB's hint named one column.
+    gw = ScriptedGateway(PLAN, "SELECT COUNT(o.TripID) FROM orders AS o", GOOD_SQL, OK)
+    run(sample_db, gw)
+    retry_message = gw.calls[2][-1]["content"]
+    assert "orders" in retry_message
+    for column in ("id", "customer_id", "amount"):
+        assert column in retry_message
+    assert "customers" not in retry_message  # only tables the query used

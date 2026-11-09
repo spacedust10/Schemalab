@@ -3,7 +3,8 @@
 PLAN = """You plan how to answer a question with one SQL query over these DuckDB tables.
 
 Write 1 to 4 short lines: which tables and columns to use, how to join them, what to filter,
-group and aggregate. Group only by what the question asks about. Do not write SQL.
+group and aggregate. Group only by what the question asks about.
+Add no filter the question does not ask for. Do not write SQL.
 {notes}
 Tables (row counts and column types; no data values are shown):
 
@@ -16,6 +17,7 @@ Rules:
 - Return only the SQL, in a ```sql fenced block.
 - One SELECT statement. No writes, no DDL, no PRAGMA, no file or table functions.
 - Use only the tables and columns listed below.
+- Add no filter the question does not ask for.
 - Add LIMIT 1000 unless the result is an aggregate.
 
 Plan:
@@ -50,7 +52,8 @@ Query that ran:
 It returned {row_count} rows with columns: {columns}
 
 Check: does the query group, filter and aggregate exactly as the question asks? Extra
-GROUP BY columns, missing filters, or the wrong aggregate are problems.
+GROUP BY columns, a filter the question does not ask for, a missing filter, or the wrong
+aggregate are problems.
 {notes}
 Reply with JSON only: {{"ok": true}} or {{"ok": false, "issue": "<one sentence>"}}
 """
