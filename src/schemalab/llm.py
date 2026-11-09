@@ -87,5 +87,9 @@ def gateway_from_settings(settings: Settings) -> Gateway:
         raise NoModelsError(
             f"No usable model in {settings.models}: {hint}add an ollama_chat/... model."
         )
-    options = {m: {"api_base": settings.ollama_api_base} for m in models if m.startswith("ollama")}
+    # Temperature 0: SQL should not change run to run, and sampling made llama3.1 invent columns.
+    options: dict[str, dict[str, Any]] = {m: {"temperature": 0} for m in models}
+    for m in models:
+        if m.startswith("ollama"):
+            options[m]["api_base"] = settings.ollama_api_base
     return Gateway(models, options)

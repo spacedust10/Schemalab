@@ -100,3 +100,16 @@ def test_no_usable_model_names_the_missing_key(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(NoModelsError, match="GROQ_API_KEY"):
         gateway_from_settings(Settings(models=["groq/openai/gpt-oss-120b"]))
+
+
+def test_gateway_from_settings_samples_at_temperature_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # At Ollama's default temperature llama3.1 invented columns and filters run to run.
+    monkeypatch.setenv("SCHEMALAB_MODELS", '["ollama_chat/llama3.1", "groq/openai/gpt-oss-120b"]')
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    gw = gateway_from_settings(Settings())
+    assert {m: gw.options[m].get("temperature") for m in gw.models} == {
+        "ollama_chat/llama3.1": 0,
+        "groq/openai/gpt-oss-120b": 0,
+    }
