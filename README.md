@@ -68,6 +68,26 @@ uv run python scripts/demo.py "What is the average fare by pickup borough?"
 
 This signs in a local demo account and prints each step as it streams: the plan, the SQL for each attempt, the rows, the critic's verdict, and the answer with its confidence and provenance. The interactive API docs at http://localhost:8000/docs cover every endpoint; use **Authorize** with the token from `/auth/register` or `/auth/login`.
 
+### Use your own data
+
+Open **Your data** to upload a file of up to 50 MB:
+
+- **.csv** becomes one table.
+- **.xlsx** becomes one table per sheet.
+- **.sql** loads a whole database dump from `pg_dump`, `mysqldump` or SQLite's `.dump`, keeping its tables, rows and primary and foreign keys. Nothing in the file is run: it is parsed, only `CREATE TABLE`, `INSERT ... VALUES` and `COPY` data are used, and every other statement is listed as skipped.
+
+Each table gets a column profile (type, share empty, distinct values, range), and a dump gets an overview of its relationships. Tables are visible only to you. On the Ask page, choose **Your tables** to ask about them; the model is told column names, types and keys, not rows.
+
+### Measure the analyst
+
+`evals/questions.yaml` holds 54 questions over the sample data, each with a reference query. The harness scores execution accuracy (does the analyst's result match the reference result) and accuracy per confidence label:
+
+```bash
+uv run python -m schemalab.evals --critic both
+```
+
+Results so far are in [evals/RESULTS.md](evals/RESULTS.md).
+
 ## Development
 
 Python 3.12 with [uv](https://docs.astral.sh/uv/); Node 22 for the web app.
