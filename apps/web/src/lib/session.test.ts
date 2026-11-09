@@ -154,8 +154,8 @@ describe("cross-site protection", () => {
 });
 
 describe("proxy matcher", () => {
-  it("guards the data page as well as the Ask page", async () => {
+  it("guards every signed-in page", async () => {
     const { config } = await import("../proxy");
-    expect(config.matcher).toEqual(["/", "/data"]);
+    expect(config.matcher).toEqual(["/", "/data", "/dashboard"]);
   });
 });

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { pickChart } from "@/lib/chart";
-import { errorText } from "@/lib/post";
+import { errorText, postJSON } from "@/lib/post";
 import { type Export, notebookName, toIpynb, toMarimo } from "@/lib/notebook";
 import { createSSEParser } from "@/lib/sse";
 import { takeaway } from "@/lib/takeaway";
@@ -246,6 +246,16 @@ function EmptyState() {
 }
 
 function NotebookLinks({ notebook }: { notebook: Export }) {
+  const [pin, setPin] = useState<string | null>(null);
+  const pinIt = async () => {
+    setPin("Pinning…");
+    const res = await postJSON("/api/pins", {
+      question: notebook.question,
+      sql: notebook.sql,
+      dataset: notebook.dataset,
+    });
+    setPin(res.ok ? "Pinned to your dashboard." : await errorText(res, "Could not pin this answer."));
+  };
   const save = (text: string, ext: "ipynb" | "py", type: string) => {
     const url = URL.createObjectURL(new Blob([text], { type }));
     const a = document.createElement("a");
@@ -263,6 +273,14 @@ function NotebookLinks({ notebook }: { notebook: Export }) {
       <button type="button" className="button quiet" onClick={() => save(toMarimo(notebook), "py", "text/x-python")}>
         marimo notebook
       </button>
+      <button type="button" className="button quiet" onClick={() => void pinIt()} disabled={pin !== null}>
+        Pin to dashboard
+      </button>
+      {pin && (
+        <span role="status">
+          {pin} {pin.startsWith("Pinned") && <Link href="/dashboard" prefetch={false}>Open it</Link>}
+        </span>
+      )}
     </p>
   );
 }

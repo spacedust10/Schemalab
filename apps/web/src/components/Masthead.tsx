@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SignOut } from "./SignOut";
 
-type Page = "ask" | "data";
+type Page = "ask" | "data" | "dashboard";
 
 export function Masthead({ signedIn = false, current }: { signedIn?: boolean; current?: Page }) {
   return (
@@ -18,6 +18,13 @@ export function Masthead({ signedIn = false, current }: { signedIn?: boolean; cu
             </Link>
             <Link href="/data" prefetch={false} aria-current={current === "data" ? "page" : undefined}>
               Your data
+            </Link>
+            <Link
+              href="/dashboard"
+              prefetch={false}
+              aria-current={current === "dashboard" ? "page" : undefined}
+            >
+              Dashboard
             </Link>
           </nav>
           <SignOut />
