@@ -11,7 +11,12 @@ _RANK: dict[Label, int] = {"low": 0, "medium": 1, "high": 2}
 
 
 def confidence(
-    attempts: int, verdict: bool | None, issue: str | None, truncated: bool, row_count: int
+    attempts: int,
+    verdict: bool | None,
+    issue: str | None,
+    truncated: bool,
+    row_count: int,
+    reviewed: bool = True,
 ) -> dict[str, Any]:
     """The label is the lowest any single reason allows, and every reason is listed."""
     label: Label = "high"
@@ -23,7 +28,9 @@ def confidence(
         if _RANK[to] < _RANK[label]:
             label = to
 
-    if verdict is False:
+    if not reviewed:
+        lower("medium", "the reviewer was off")
+    elif verdict is False:
         lower("low", f"the reviewer still objected: {issue}")
     elif verdict is None:
         lower("medium", "the reviewer gave no verdict")

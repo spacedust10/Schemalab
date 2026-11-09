@@ -53,10 +53,12 @@ def run_agent(
     gateway: Gateway,
     share_results: bool = False,
     notes: Sequence[str] = (),
+    critic: bool = True,
 ) -> Iterator[Event]:
     """Stream the analyst's events. Result rows reach the model only if `share_results`.
 
     `notes` are the asking user's corrections, added to the planner, writer and critic.
+    `critic=False` skips the reviewer, for measuring what it adds (#24).
     """
     if not _has_tables(db_path):
         yield {
@@ -66,11 +68,13 @@ def run_agent(
             "uv run python -m schemalab.datasets",
         }
         return
-    graph = _build(db_path, gateway, share_results, prompts.notes_block(list(notes)))
+    graph = _build(db_path, gateway, share_results, prompts.notes_block(list(notes)), critic)
     yield from graph.stream({"question": question, "attempt": 0}, stream_mode="custom")
 
 
-def _build(db_path: Path, gateway: Gateway, share_results: bool, notes: str) -> Any:
+def _build(
+    db_path: Path, gateway: Gateway, share_results: bool, notes: str, use_critic: bool
+) -> Any:
     models_used: list[str] = []  # the graph is built per question, so this is per run
 
     def ask_model(messages: list[dict[str, str]]) -> Completion | None:
@@ -219,6 +223,7 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool, notes: str) -> 
                     issue=state.get("problem"),
                     truncated=result.truncated,
                     row_count=len(rows),
+                    reviewed=use_critic,
                 ),
                 "provenance": {
                     "sql": result.sql,
@@ -243,7 +248,9 @@ def _build(db_path: Path, gateway: Gateway, share_results: bool, notes: str) -> 
     def after_run(state: State) -> str:
         if state.get("failed"):
             return END
-        return "critic" if state.get("result") is not None else "write_sql"
+        if state.get("result") is None:
+            return "write_sql"
+        return "critic" if use_critic else "answer"
 
     g = StateGraph(State)
     for name, fn in [

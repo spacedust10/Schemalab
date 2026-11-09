@@ -245,3 +245,12 @@ def test_unknown_column_retry_lists_the_real_columns(sample_db: Path) -> None:
     for column in ("id", "customer_id", "amount"):
         assert column in retry_message
     assert "customers" not in retry_message  # only tables the query used
+
+
+def test_critic_can_be_switched_off(sample_db: Path) -> None:
+    # The eval harness compares runs with and without the reviewer (#24).
+    gw = ScriptedGateway(PLAN, GOOD_SQL)
+    events = list(run_agent("How many orders?", sample_db, gw, critic=False))
+    assert steps(events) == ["schema", "plan", "sql", "result", "answer"]
+    assert gw.replies == []
+    assert "the reviewer was off" in events[-1]["confidence"]["reasons"]
