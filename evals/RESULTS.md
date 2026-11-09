@@ -47,3 +47,24 @@ here before it ships.
 Other misses: joining the insurance table to taxi zones on unrelated ids (m03, m04, m06, m07,
 m08), counting distinct zones instead of trips (t09), and treating Sunday to Thursday as weekdays
 (t35; DuckDB numbers days from Sunday as 0).
+
+## 2026-11-09: category values (#30)
+
+Same model and questions, critic as judge. "Values on" lists the distinct values of short text
+columns (at most 100 values of at most 60 characters) in the schema the model sees, which the
+app now does for the sample data.
+
+| Agent version | Accuracy | Taxi (36) | Insurance (18) | Seconds per question |
+|---|---|---|---|---|
+| Values off | 64.8% (35) | 31 | 4 | 9.3 |
+| **Values on (now, sample data)** | **75.9% (41)** | 28 | **13** | 12.3 |
+
+Values fixed 12 answers (t09, t17, t20, m04 to m08, m10, m12, m13, m15): the model now writes
+`'Under 65 years'`, `'Both Sexes'` and `'Airports'` as they are stored. They broke 6, all taxi
+questions (t07, t21, t22, t27, t28, t32), where the longer prompt led llama3.1 into filters
+nobody asked for, such as `payment_type IN (1, 2, 3)`; five of the six came back labelled low.
+
+Labels stay informative: high was right 91% of the time (35 answers), low 50% (18).
+
+Next to try: list values only for the tables a question is likely to need, which should keep
+the insurance gains without lengthening every taxi prompt.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The model now sees the values of short category columns ('Under 65 years', 'Airports') for the sample data, and for uploaded tables when the user ticks a box. Accuracy on the eval rose from 64.8% to 75.9%; see evals/RESULTS.md.
+- The category scan is bounded in memory and time, so a large upload cannot stall questions.
+
 ## 0.1.0 (2026-11-09)
 
 The first release: a safe core and an AI data analyst on free, local models.
