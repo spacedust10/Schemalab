@@ -20,7 +20,13 @@ def get_uploads_dir() -> Path:
     return Path(get_settings().uploads_dir)
 
 
+def get_db_path() -> Path:
+    """The built-in sample database."""
+    return Path(get_settings().db_path)
+
+
 UploadsDir = Annotated[Path, Depends(get_uploads_dir)]
+SampleDb = Annotated[Path, Depends(get_db_path)]
 
 
 def user_db(root: Path, user: dict[str, Any]) -> Path:

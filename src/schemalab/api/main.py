@@ -17,8 +17,9 @@ from schemalab.agent.graph import run_agent
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
 from schemalab.api.corrections import router as corrections_router
-from schemalab.api.datasets import UploadsDir, user_db
+from schemalab.api.datasets import UploadsDir, get_db_path, user_db
 from schemalab.api.datasets import router as datasets_router
+from schemalab.api.pins import router as pins_router
 from schemalab.config import Settings, get_settings
 from schemalab.llm import Gateway, NoModelsError, gateway_from_settings
 
@@ -31,10 +32,6 @@ class AskRequest(BaseModel):
     ]
     # "sample": the built-in datasets. "mine": the caller's uploaded tables.
     dataset: Literal["sample", "mine"] = "sample"
-
-
-def get_db_path() -> Path:
-    return Path(get_settings().db_path)
 
 
 def get_gateway(settings: Annotated[Settings, Depends(get_settings)]) -> Gateway:
@@ -73,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(corrections_router)
     app.include_router(datasets_router)
+    app.include_router(pins_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

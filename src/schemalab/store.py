@@ -74,6 +74,17 @@ corrections = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+pins = Table(
+    "pins",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("question", Text, nullable=False),
+    Column("sql", Text, nullable=False),
+    Column("dataset", String(10), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 login_attempts = Table(
     "login_attempts",
     metadata,
@@ -260,6 +271,30 @@ def delete_correction(conn: Connection, user_id: int, correction_id: int) -> boo
             corrections.c.id == correction_id, corrections.c.user_id == user_id
         )
     )
+    return result.rowcount == 1
+
+
+def add_pin(conn: Connection, user_id: int, question: str, sql: str, dataset: str) -> int:
+    row = conn.execute(
+        insert(pins)
+        .values(user_id=user_id, question=question, sql=sql, dataset=dataset, created_at=_now())
+        .returning(pins.c.id)
+    ).one()
+    return int(row.id)
+
+
+def list_pins(conn: Connection, user_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        select(pins.c.id, pins.c.question, pins.c.sql, pins.c.dataset)
+        .where(pins.c.user_id == user_id)
+        .order_by(pins.c.id)
+    ).all()
+    return [{"id": r.id, "question": r.question, "sql": r.sql, "dataset": r.dataset} for r in rows]
+
+
+def delete_pin(conn: Connection, user_id: int, pin_id: int) -> bool:
+    """Delete one of the user's pins. False if it does not exist or belongs to someone else."""
+    result = conn.execute(delete(pins).where(pins.c.id == pin_id, pins.c.user_id == user_id))
     return result.rowcount == 1
 
 
