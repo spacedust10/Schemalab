@@ -6,6 +6,7 @@ Category values are the distinct values of short text columns, such as 'Male Onl
 match nothing; that was the main cause of wrong answers in the first eval run.
 """
 
+import threading
 from collections.abc import Collection
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from schemalab.guards.engine import open_readonly
 
 MAX_CATEGORIES = 100  # more distinct values than this is free text or an id, not a category
 MAX_VALUE_CHARS = 60
+CATEGORY_TIMEOUT_S = 2.0  # per column
 
 
 def describe_schema(
@@ -46,13 +48,34 @@ def describe_schema(
 
 
 def _categories(con: duckdb.DuckDBPyConnection, table: str, column: str) -> list[str] | None:
-    """The column's distinct values as SQL literals, or None if it is not a short category."""
-    # Names come from the catalog and are quoted; one row past the limit is enough to know.
+    """The column's distinct values as SQL literals, or None if it is not a short category.
+
+    A constant-memory estimate runs first, so the exact DISTINCT (which holds every value)
+    only runs on columns that look like short categories. Both stop at CATEGORY_TIMEOUT_S, so
+    a large upload cannot stall every question; a column that times out gets no list.
+    """
+    timer = threading.Timer(CATEGORY_TIMEOUT_S, con.interrupt)
+    timer.start()
+    try:
+        # Names come from the catalog and are quoted.
+        approx, longest = con.execute(
+            f'SELECT approx_count_distinct("{column}"), max(length("{column}")) FROM "{table}"'  # noqa: S608
+        ).fetchone() or (0, 0)
+        if not approx or approx > MAX_CATEGORIES * 2 or (longest or 0) > MAX_VALUE_CHARS:
+            return None
+        values = _distinct_values(con, table, column)
+    except duckdb.InterruptException:
+        return None
+    finally:
+        timer.cancel()
+    if not values or len(values) > MAX_CATEGORIES:
+        return None
+    return ["'" + v.replace("'", "''") + "'" for v in values]
+
+
+def _distinct_values(con: duckdb.DuckDBPyConnection, table: str, column: str) -> list[str]:
     rows = con.execute(
         f'SELECT DISTINCT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL '  # noqa: S608
         f"ORDER BY 1 LIMIT {MAX_CATEGORIES + 1}"
     ).fetchall()
-    values = [r[0] for r in rows]
-    if not values or len(values) > MAX_CATEGORIES or max(map(len, values)) > MAX_VALUE_CHARS:
-        return None
-    return ["'" + v.replace("'", "''") + "'" for v in values]
+    return [r[0] for r in rows]

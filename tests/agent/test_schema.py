@@ -91,3 +91,31 @@ def test_category_values_and_key_notes_share_a_line(survey: Path) -> None:
         con.execute("COMMENT ON COLUMN answers.sex IS 'references sexes(code)'")
     text = describe_schema(survey, categories=True)
     assert "  sex VARCHAR -- references sexes(code); values: 'Both Sexes', 'Male Only'" in text
+
+
+def test_slow_category_scans_give_up_instead_of_blocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A big upload must not stall every question while its text columns are scanned.
+    import schemalab.agent.schema as schema
+
+    path = tmp_path / "big.duckdb"
+    with duckdb.connect(str(path)) as con:
+        con.execute("CREATE TABLE big AS SELECT 'v' || (i % 50) AS kind FROM range(3000000) t(i)")
+    monkeypatch.setattr(schema, "CATEGORY_TIMEOUT_S", 0.001)
+    text = describe_schema(path, categories=True)
+    assert "  kind VARCHAR" in text and "values:" not in text
+
+
+def test_high_cardinality_columns_skip_the_exact_distinct(
+    survey: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The exact DISTINCT holds every value in memory, so it only runs once a constant-memory
+    # estimate says the column is a short category.
+    import schemalab.agent.schema as schema
+
+    seen: list[str] = []
+    real = schema._distinct_values
+    monkeypatch.setattr(schema, "_distinct_values", lambda *a: seen.append(a[2]) or real(*a))
+    describe_schema(survey, categories=True)
+    assert "note" not in seen and "sex" in seen
