@@ -10,12 +10,14 @@ def describe_schema(db_path: Path, tables: Collection[str] | None = None) -> str
     """One block per table: name, row count, then one `column TYPE` line per column."""
     with open_readonly(db_path) as con:
         columns = con.execute(
-            "SELECT table_name, column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = 'main' ORDER BY table_name, ordinal_position"
+            # comment: key notes from .sql uploads, such as "references customers(id)".
+            "SELECT table_name, column_name, data_type, comment FROM duckdb_columns() "
+            "WHERE schema_name = 'main' AND database_name = current_database() "
+            "ORDER BY table_name, column_index"
         ).fetchall()
         blocks: list[str] = []
         current = None
-        for table, column, dtype in columns:
+        for table, column, dtype, comment in columns:
             if tables is not None and table not in tables:
                 continue
             if table != current:
@@ -23,5 +25,5 @@ def describe_schema(db_path: Path, tables: Collection[str] | None = None) -> str
                 (count,) = con.execute(f'SELECT count(*) FROM "{table}"').fetchone() or (0,)  # noqa: S608
                 blocks.append(f"{table} ({count} rows)")
                 current = table
-            blocks[-1] += f"\n  {column} {dtype}"
+            blocks[-1] += f"\n  {column} {dtype}" + (f" -- {comment}" if comment else "")
     return "\n\n".join(blocks)

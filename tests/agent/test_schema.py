@@ -46,3 +46,9 @@ def test_tables_are_in_a_stable_order(db: Path) -> None:
 def test_can_limit_to_some_tables(db: Path) -> None:
     text = describe_schema(db, tables={"clinics"})
     assert "clinics" in text and "patients" not in text
+
+
+def test_column_notes_tell_the_model_how_tables_join(db: Path) -> None:
+    with duckdb.connect(str(db)) as con:
+        con.execute("COMMENT ON COLUMN patients.id IS 'references clinics(clinic_id)'")
+    assert "  id INTEGER -- references clinics(clinic_id)" in describe_schema(db)
