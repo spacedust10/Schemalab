@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { errorText } from "@/lib/post";
-import { type Dataset, MAX_MB, checkFile, uploadFile } from "@/lib/upload";
+import { type Dataset, MAX_MB, checkFile, relationships, skippedText, uploadFile } from "@/lib/upload";
 import { ProfileTable } from "./ProfileTable";
 
 export function DataView() {
@@ -39,9 +39,13 @@ export function DataView() {
     try {
       const res = await uploadFile(file);
       if (!res.ok) return setError(await errorText(res, "The upload failed. Try again."));
-      const body = (await res.json()) as { created: string[]; tables: Dataset[] };
+      const body = (await res.json()) as {
+        created: string[];
+        skipped: Record<string, number>;
+        tables: Dataset[];
+      };
       setTables(body.tables);
-      setNotice(`Added ${body.created.join(", ")}.`);
+      setNotice([`Added ${body.created.join(", ")}.`, skippedText(body.skipped)].filter(Boolean).join(" "));
     } catch {
       setError("Lost the connection while uploading.");
     } finally {
@@ -64,22 +68,24 @@ export function DataView() {
       <header className="data-head">
         <h1>Your data</h1>
         <p className="lede">
-          Upload a .csv or .xlsx file of up to {MAX_MB} MB. Each file, or each sheet of a
-          workbook, becomes a table that only you can see. The model is told column names and
-          types, not your rows.
+          Upload a .csv, .xlsx or .sql file of up to {MAX_MB} MB. A spreadsheet becomes one table
+          per sheet; a database dump from pg_dump, mysqldump or SQLite keeps all its tables and
+          keys. Only you can see them. The model is told column names, types and keys, not your
+          rows.
         </p>
         <div className="field upload">
           <label htmlFor="file">File to upload</label>
           <input
             id="file"
             type="file"
-            accept=".csv,.xlsx"
+            accept=".csv,.xlsx,.sql"
             disabled={busy}
             aria-describedby="file-hint"
             onChange={(e) => void upload(e.currentTarget)}
           />
           <p id="file-hint" className="hint">
-            The first row should hold column names.
+            Spreadsheets need column names in the first row. Nothing in a .sql file is run: only
+            its tables, rows and keys are read.
           </p>
         </div>
         <p className="status" role="status">
@@ -94,6 +100,7 @@ export function DataView() {
       </header>
 
       {tables?.length === 0 && <p className="hint">No tables yet. Upload a file to start.</p>}
+      {tables && tables.length > 0 && <Overview tables={tables} />}
       {tables?.map((t) => (
         <section key={t.name} className="dataset" aria-labelledby={`t-${t.name}`}>
           <div className="dataset-head">
@@ -109,5 +116,29 @@ export function DataView() {
         </section>
       ))}
     </main>
+  );
+}
+
+function Overview({ tables }: { tables: Dataset[] }) {
+  const links = relationships(tables);
+  const rows = tables.reduce((sum, t) => sum + t.rows, 0);
+  return (
+    <section className="overview" aria-labelledby="overview">
+      <h2 id="overview">Overview</h2>
+      <p>
+        {tables.length} {tables.length === 1 ? "table" : "tables"}, {rows.toLocaleString("en-US")}{" "}
+        rows, {links.length} {links.length === 1 ? "relationship" : "relationships"}.
+      </p>
+      {links.length > 0 && (
+        <ul className="links">
+          {links.map((l) => (
+            <li key={l.from}>
+              <code>{l.from}</code> <span aria-hidden="true">→</span>
+              <span className="sr-only">references</span> <code>{l.to}</code>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

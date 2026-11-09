@@ -2,6 +2,7 @@ import type { ColumnProfile } from "@/lib/upload";
 
 /** One row per column: type, how much is missing, distinct values and range. */
 export function ProfileTable({ columns }: { columns: ColumnProfile[] }) {
+  const keys = columns.some((c) => c.note);
   return (
     <div className="table-wrap">
       <table>
@@ -10,6 +11,7 @@ export function ProfileTable({ columns }: { columns: ColumnProfile[] }) {
           <tr>
             <th scope="col">Column</th>
             <th scope="col">Type</th>
+            {keys && <th scope="col">Key</th>}
             <th scope="col" className="num">Empty</th>
             <th scope="col" className="num">Distinct (approx.)</th>
             <th scope="col">Smallest</th>
@@ -21,6 +23,7 @@ export function ProfileTable({ columns }: { columns: ColumnProfile[] }) {
             <tr key={c.name}>
               <th scope="row" className="mono">{c.name}</th>
               <td className="mono">{c.type}</td>
+              {keys && <td>{c.note ?? ""}</td>}
               <td className="num">{c.null_percent ? `${c.null_percent}%` : "none"}</td>
               <td className="num">{c.distinct.toLocaleString("en-US")}</td>
               <td className="clip">{c.min ?? "none"}</td>
