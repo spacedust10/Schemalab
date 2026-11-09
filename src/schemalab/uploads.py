@@ -1,4 +1,5 @@
-"""User uploads: each .csv file or Excel sheet becomes a table in a DuckDB file of the user's own.
+"""User uploads: each .csv file, Excel sheet or table in a .sql dump becomes a table in a DuckDB
+file of the user's own.
 
 Imports are trusted code with a normal connection, like `datasets`. They build into a copy and
 swap it in, so a failed upload leaves the user's tables as they were and queries running against
@@ -12,6 +13,7 @@ import shutil
 import tempfile
 import threading
 import zipfile
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
@@ -21,13 +23,16 @@ import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
 
 from schemalab.guards.engine import open_readonly
+from schemalab.sqldump import NULL, DumpError, ident, read_dump
 
 MAX_BYTES = 50 * 1024 * 1024
 # A zipped .xlsx can expand far past MAX_BYTES; this caps the CSV it unpacks to.
 MAX_UNPACKED_BYTES = 4 * MAX_BYTES
-MAX_TABLES = 20
+MAX_TABLES = 50  # a whole database dump can hold dozens
 MAX_COLUMNS = 500
-SUFFIXES = (".csv", ".xlsx")
+SUFFIXES = (".csv", ".xlsx", ".sql")
+# Key notes are built from [a-z0-9_] identifiers, so they are safe inside a SQL string.
+_NOTE = re.compile(r"(primary key|part of the primary key|references [a-z0-9_]+(\([a-z0-9_]+\))?)")
 
 # Trusted connection, but still no extension downloads.
 _CONFIG: dict[str, str | bool | int | float | list[str]] = {
@@ -42,24 +47,24 @@ class UploadError(ValueError):
     """The file cannot be imported. The message is safe to show the user."""
 
 
+@dataclass(frozen=True)
+class Imported:
+    tables: list[str]
+    skipped: dict[str, int]  # statement kind -> count, for .sql dumps
+
+
 def table_name(filename: str, taken: set[str]) -> str:
     """A lowercase [a-z0-9_] identifier from the file name, not starting with a digit."""
     base = Path(filename).name
     base = base.rsplit(".", 1)[0] if "." in base else base
-    name = re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_")[:50] or "upload"
-    if name[0].isdigit():
-        name = f"t_{name}"
-    unique, n = name, 2
-    while unique in taken:
-        unique, n = f"{name}_{n}", n + 1
-    return unique
+    return ident(base if re.search(r"[A-Za-z0-9]", base) else "upload", taken)
 
 
-def import_file(db: Path, src: Path, filename: str) -> list[str]:
+def import_file(db: Path, src: Path, filename: str) -> Imported:
     """Add the file's tables to `db` and return their names."""
     suffix = Path(filename).suffix.lower()
     if suffix not in SUFFIXES:
-        raise UploadError("Upload a .csv or .xlsx file.")
+        raise UploadError("Upload a .csv, .xlsx or .sql file.")
     with _LOCK, tempfile.TemporaryDirectory() as work:
         db.parent.mkdir(parents=True, exist_ok=True)
         tmp = db.with_name(db.name + ".importing")
@@ -69,25 +74,76 @@ def import_file(db: Path, src: Path, filename: str) -> list[str]:
         try:
             with duckdb.connect(str(tmp), config=_CONFIG) as con:
                 taken = set(_tables(con))
-                if suffix == ".csv":
-                    sources = [(filename, src, False)]
+                if suffix == ".sql":
+                    result = _load_dump(con, src, Path(work), taken)
                 else:
-                    sources = _excel_to_csv(src, filename, Path(work))
-                if len(taken) + len(sources) > MAX_TABLES:
-                    raise UploadError(
-                        f"You can keep at most {MAX_TABLES} tables. Delete one first."
-                    )
-                created = [
-                    _load(con, table_name(n, taken), path, header, taken)
-                    for n, path, header in sources
-                ]
+                    if suffix == ".csv":
+                        sources = [(filename, src, False)]
+                    else:
+                        sources = _excel_to_csv(src, filename, Path(work))
+                    _check_room(taken, len(sources))
+                    created = [
+                        _load(con, table_name(n, taken), path, header, taken)
+                        for n, path, header in sources
+                    ]
+                    result = Imported(created, {})
             tmp.replace(db)
-            return created
+            return result
         except duckdb.Error as e:
             detail = str(e).splitlines()[0]
             raise UploadError(f"Could not read {Path(filename).name}: {detail}") from None
         finally:
             tmp.unlink(missing_ok=True)
+
+
+def _check_room(taken: set[str], adding: int) -> None:
+    if len(taken) + adding > MAX_TABLES:
+        raise UploadError(f"You can keep at most {MAX_TABLES} tables. Delete some first.")
+
+
+def _load_dump(con: duckdb.DuckDBPyConnection, src: Path, work: Path, taken: set[str]) -> Imported:
+    """Create the dump's tables from its parsed definitions and load the rows it holds."""
+    try:
+        dump = read_dump(src.read_text(encoding="utf-8", errors="replace"), work)
+    except DumpError as e:
+        raise UploadError(str(e)) from None
+    _check_room(taken, len(dump.tables))
+    renamed: dict[str, str] = {}
+    for table in dump.tables:
+        if len(table.columns) > MAX_COLUMNS:
+            raise UploadError(f"A table can have at most {MAX_COLUMNS} columns.")
+        name = ident(table.name, taken)
+        taken.add(name)
+        renamed[table.name] = name
+        # Names are [a-z0-9_] identifiers and types matched a strict pattern in sqldump.
+        columns = [(c, _duckdb_type(con, t)) for c, t in table.columns]
+        con.execute(f'CREATE TABLE "{name}" ({", ".join(f'"{c}" {t}' for c, t in columns)})')
+        if table.row_count:
+            # TRY_CAST: a value the column type cannot hold becomes NULL rather than failing
+            # the whole file; the profile shows how much of each column is empty.
+            casts = ", ".join(f'TRY_CAST("{c}" AS {t})' for c, t in columns)
+            options = "header = true, all_varchar = true, delim = ',', quote = '\"', escape = '\"'"
+            con.execute(
+                # OFFSET 0 stops DuckDB pushing the casts into the CSV reader, where they
+                # would fail strictly instead of giving NULL.
+                f'INSERT INTO "{name}" SELECT {casts} '  # noqa: S608
+                f"FROM (SELECT * FROM read_csv(?, {options}, nullstr = '{NULL}') OFFSET 0)",
+                [str(table.csv)],
+            )
+    for (table_key, column), note in dump.keys.items():
+        note = re.sub(r"references (\w+)", lambda m: f"references {renamed.get(m[1], m[1])}", note)
+        if _NOTE.fullmatch(note):
+            con.execute(f'COMMENT ON COLUMN "{renamed[table_key]}"."{column}" IS \'{note}\'')
+    return Imported([renamed[t.name] for t in dump.tables], dict(dump.skipped))
+
+
+def _duckdb_type(con: duckdb.DuckDBPyConnection, sql_type: str) -> str:
+    """The type if DuckDB has it (MONEY, for one, it does not), else VARCHAR."""
+    try:
+        con.execute(f"SELECT CAST(NULL AS {sql_type})")
+    except duckdb.Error:
+        return "VARCHAR"
+    return sql_type
 
 
 def _load(
@@ -176,6 +232,13 @@ def list_tables(db: Path) -> list[dict[str, Any]]:
             (rows,) = con.execute(f'SELECT count(*) FROM "{name}"').fetchone() or (0,)  # noqa: S608
             summary = con.execute(f'SUMMARIZE "{name}"').fetchall()
             cols = [d[0] for d in con.description or []]
+            notes = dict(
+                con.execute(
+                    "SELECT column_name, comment FROM duckdb_columns() "
+                    "WHERE schema_name = 'main' AND table_name = ?",
+                    [name],
+                ).fetchall()
+            )
             columns = []
             for values in summary:
                 s = dict(zip(cols, values, strict=True))
@@ -187,6 +250,7 @@ def list_tables(db: Path) -> list[dict[str, Any]]:
                         "max": s["max"],
                         "distinct": s["approx_unique"],
                         "null_percent": float(s["null_percentage"] or 0),
+                        "note": notes.get(s["column_name"]) or None,
                     }
                 )
             out.append({"name": name, "rows": rows, "columns": columns})

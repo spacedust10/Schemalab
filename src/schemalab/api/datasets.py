@@ -1,4 +1,4 @@
-"""A user's own tables: upload a .csv or .xlsx file, list the tables with profiles, delete one."""
+"""A user's own tables: upload a .csv, .xlsx or .sql file, list them with profiles, delete one."""
 
 import tempfile
 from pathlib import Path
@@ -50,10 +50,14 @@ async def upload(
         tmp.flush()
         db = user_db(root, user)
         try:
-            created = await run_in_threadpool(uploads.import_file, db, Path(tmp.name), name)
+            result = await run_in_threadpool(uploads.import_file, db, Path(tmp.name), name)
         except uploads.UploadError as e:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
-    return {"created": created, "tables": await run_in_threadpool(uploads.list_tables, db)}
+    return {
+        "created": result.tables,
+        "skipped": result.skipped,
+        "tables": await run_in_threadpool(uploads.list_tables, db),
+    }
 
 
 @router.get("")

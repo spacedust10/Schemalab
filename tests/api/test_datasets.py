@@ -54,7 +54,7 @@ def test_each_user_sees_only_their_own_tables(client: TestClient) -> None:
 def test_unsupported_file_is_refused_with_a_reason(client: TestClient) -> None:
     resp = upload(client, register(client), name="data.json")
     assert resp.status_code == 400
-    assert ".csv or .xlsx" in resp.json()["detail"]
+    assert ".csv, .xlsx or .sql" in resp.json()["detail"]
 
 
 def test_name_is_required(client: TestClient) -> None:
@@ -142,3 +142,13 @@ def test_excel_upload_through_the_api(client: TestClient, tmp_path: Any) -> None
     resp = upload(client, register(client), body=path.read_bytes(), name="Sales.xlsx")
     assert resp.status_code == 201, resp.text
     assert resp.json()["created"] == ["sales"]
+
+
+def test_sql_dump_upload_reports_what_was_skipped(client: TestClient) -> None:
+    dump = b"CREATE TABLE t (id int PRIMARY KEY); INSERT INTO t VALUES (1); GRANT ALL ON t TO x;"
+    resp = upload(client, register(client), body=dump, name="db.sql")
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["created"] == ["t"]
+    assert body["skipped"] == {"GRANT": 1}
+    assert body["tables"][0]["columns"][0]["note"] == "primary key"
