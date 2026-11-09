@@ -36,7 +36,7 @@ describe("reduceTrace", () => {
         step: "answer",
         text: "n is 1.",
         confidence: { label: "high", reasons: ["ok"] },
-        provenance: { sql: "SELECT 1", tables: ["t"], attempts: 1, models: ["m"], results_shared_with_model: false },
+        provenance: { sql: "SELECT 1", tables: ["t"], attempts: 1, models: ["m"], results_shared_with_model: false, categories_shared_with_model: false },
       },
     ]);
     expect(t.done).toBe(true);

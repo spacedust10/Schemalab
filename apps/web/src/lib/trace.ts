@@ -20,6 +20,7 @@ export type Provenance = {
   attempts: number;
   models: string[];
   results_shared_with_model: boolean;
+  categories_shared_with_model: boolean;
 };
 export type Result = { columns: string[]; rows: Cell[][]; truncated: boolean };
 

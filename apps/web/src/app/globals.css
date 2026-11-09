@@ -320,6 +320,10 @@ a {
   margin: 0;
   accent-color: var(--accent);
 }
+.source .share {
+  flex-basis: 100%;
+  color: var(--ink-2);
+}
 .question textarea {
   font: 400 var(--step-1) / 1.4 var(--serif);
 }

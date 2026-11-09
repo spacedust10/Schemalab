@@ -13,6 +13,8 @@ export function Provenance({ provenance: p }: { provenance: P }) {
         <dd>{p.models.join(", ")}</dd>
         <dt>Rows sent to model</dt>
         <dd>{p.results_shared_with_model ? "Yes, up to 20 result rows" : "No, schema and SQL only"}</dd>
+        <dt>Category values sent</dt>
+        <dd>{p.categories_shared_with_model ? "Yes, values of short text columns" : "No"}</dd>
       </dl>
       <pre className="sql">
         <code>{p.sql}</code>

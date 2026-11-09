@@ -42,6 +42,15 @@ export function AskView() {
   const abort = useRef<AbortController | null>(null);
   const [source, setSource] = useState<Source>("sample");
   const [uploads, setUploads] = useState<Dataset[]>([]);
+  // The checkbox shows only after "Your tables" is picked, so reading storage here cannot
+  // cause a server/client mismatch.
+  const [shareCategories, setShareCategories] = useState(() => {
+    try {
+      return localStorage.getItem("shareCategories") === "yes";
+    } catch {
+      return false; // no storage (server render, or blocked): keep the private default
+    }
+  });
 
   useEffect(() => {
     fetch("/api/datasets")
@@ -49,6 +58,15 @@ export function AskView() {
       .then(setUploads)
       .catch(() => setUploads([]));
   }, []);
+
+  function chooseShare(on: boolean) {
+    setShareCategories(on);
+    try {
+      localStorage.setItem("shareCategories", on ? "yes" : "no");
+    } catch {
+      // storage blocked: the choice still applies to this visit
+    }
+  }
 
   async function ask(q: string) {
     const text = q.trim();
@@ -64,7 +82,11 @@ export function AskView() {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: text, dataset: source }),
+        body: JSON.stringify({
+          question: text,
+          dataset: source,
+          share_categories: source === "mine" && shareCategories,
+        }),
         signal: abort.current.signal,
       });
       if (res.status === 401) {
@@ -126,6 +148,16 @@ export function AskView() {
               <Link href="/data" prefetch={false}>
                 Upload a file
               </Link>
+            )}
+            {source === "mine" && (
+              <label className="share">
+                <input
+                  type="checkbox"
+                  checked={shareCategories}
+                  onChange={(e) => chooseShare(e.currentTarget.checked)}
+                />
+                Let the model see category values (short text columns only), for better filters
+              </label>
             )}
           </fieldset>
           <div className="field">
@@ -242,7 +274,9 @@ function EmptyState() {
       <p>
         The analyst plans a query, writes SQL, checks it against a safety guard, runs it on the
         data you picked and reviews it against your question. Every step shows up on the right as it
-        happens. The model sees table and column names only, never your rows.
+        happens. The model sees table and column names and types, never your rows. For the sample
+        data it also sees the values of short category columns, such as borough names; for your
+        own tables only if you allow it.
       </p>
     </div>
   );
