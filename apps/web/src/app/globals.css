@@ -144,11 +144,26 @@ a {
   align-items: center;
   gap: var(--space-4);
 }
+.masthead-end .button {
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  /* On a phone: wordmark and Sign out on the first row, the page links on their own row. */
+  .masthead-end {
+    display: contents;
+  }
+  .nav {
+    order: 3;
+    width: 100%;
+    gap: 0 var(--space-4);
+  }
+}
 .nav {
   display: flex;
   gap: var(--space-4);
 }
 .nav a {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -584,8 +599,7 @@ pre.sql {
   gap: var(--space-4);
   max-width: 62ch;
 }
-.nf-form select,
-.field input.mono {
+.nf-form select {
   width: 100%;
   min-height: 44px;
   padding: 0 var(--space-3);
@@ -595,8 +609,8 @@ pre.sql {
   color: var(--ink);
   font: inherit;
 }
-.field .mono,
-.mono {
+.field input.mono,
+.field textarea.mono {
   font-family: var(--mono);
 }
 .nf-form .button {
