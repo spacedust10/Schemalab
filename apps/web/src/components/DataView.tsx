@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { errorText } from "@/lib/post";
 import { type Dataset, MAX_MB, checkFile, relationships, skippedText, uploadFile } from "@/lib/upload";
+import { ConstraintCoach } from "./ConstraintCoach";
 import { ProfileTable } from "./ProfileTable";
 
 export function DataView() {
@@ -113,6 +114,7 @@ export function DataView() {
             </button>
           </div>
           <ProfileTable columns={t.columns} />
+          <ConstraintCoach table={t.name} />
         </section>
       ))}
     </main>

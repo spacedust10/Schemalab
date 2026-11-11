@@ -587,6 +587,67 @@ pre.sql {
   color: var(--ink-2);
 }
 
+/* Algebra and constraint coach */
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+.palette button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 var(--step-1) / 1 var(--mono);
+  cursor: pointer;
+}
+.nf-select,
+.er-input select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.ra-line {
+  font-size: var(--step-1);
+  overflow-wrap: anywhere;
+}
+.notes {
+  display: grid;
+  gap: var(--space-1);
+  padding-left: var(--space-5);
+  color: var(--ink-2);
+  font-size: var(--step--1);
+}
+.coach {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+.coach-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.coach-kind {
+  font-weight: 700;
+}
+.coach summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
 /* ER designer */
 .er-page {
   max-width: 1240px;
