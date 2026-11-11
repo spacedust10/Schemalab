@@ -571,6 +571,90 @@ pre.sql {
   color: var(--ink-2);
 }
 
+/* Normalize */
+.normalize {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-7);
+  display: grid;
+  gap: var(--space-6);
+}
+.nf-form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 62ch;
+}
+.nf-form select,
+.field input.mono {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.field .mono,
+.mono {
+  font-family: var(--mono);
+}
+.nf-form .button {
+  justify-self: start;
+}
+.nf-result {
+  display: grid;
+  gap: var(--space-6);
+}
+.ladder {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  font-weight: 700;
+}
+.ladder span {
+  font-weight: 400;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+.ladder .met {
+  color: var(--ok);
+}
+.ladder .unmet {
+  color: var(--ink-2);
+  text-decoration: line-through;
+}
+.violations,
+.steps,
+.relations {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 72ch;
+  padding-left: var(--space-5);
+}
+.relations {
+  padding-left: 0;
+  list-style: none;
+}
+.relations u {
+  text-underline-offset: 3px;
+}
+.decompositions {
+  display: grid;
+  gap: var(--space-6);
+}
+@media (min-width: 1024px) {
+  .decompositions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+td.strong {
+  font-weight: 700;
+}
+
 /* Dashboard */
 .dashboard {
   max-width: 1240px;
