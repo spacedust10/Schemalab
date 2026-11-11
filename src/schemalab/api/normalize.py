@@ -59,7 +59,7 @@ def analyze(user: UserDep, body: NormalizeRequest) -> dict[str, Any]:
     result: dict[str, Any] = {
         "attributes": attrs,
         "dependencies": [dep(f) for f in fds],
-        "cover": [dep(f) for f in cover],
+        "cover": [dep(f) for f in _merged(cover, attrs)],
         "keys": [names(k) for k in keys],
         "prime": names(frozenset().union(*keys)),
         "form": report.form,
@@ -77,3 +77,13 @@ def analyze(user: UserDep, body: NormalizeRequest) -> dict[str, Any]:
             "superkey": plus == frozenset(attrs),
         }
     return result
+
+
+def _merged(fds: list[nf.FD], attrs: list[str]) -> list[nf.FD]:
+    """Equal left sides merged and sorted by schema order, as textbooks print a cover."""
+    pos = {a: i for i, a in enumerate(attrs)}
+    groups: dict[frozenset[str], set[str]] = {}
+    for fd in fds:
+        groups.setdefault(fd.lhs, set()).update(fd.rhs)
+    merged = [nf.FD(lhs, frozenset(rhs)) for lhs, rhs in groups.items()]
+    return sorted(merged, key=lambda f: (len(f.lhs), sorted(pos[a] for a in f.lhs)))

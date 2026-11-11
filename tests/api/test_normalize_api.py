@@ -58,3 +58,9 @@ def test_unreadable_input_says_what_to_fix(client: TestClient) -> None:
 def test_closure_of_an_unknown_attribute_is_refused(client: TestClient) -> None:
     resp = analyze(client, {**BODY, "closure_of": "Q"})
     assert resp.status_code == 400 and "Q" in resp.json()["detail"]
+
+
+def test_cover_is_shown_merged_by_left_side_in_schema_order(client: TestClient) -> None:
+    body = {"schema": "E(sid, name, major, course)", "dependencies": "sid -> major, name"}
+    got = analyze(client, body).json()
+    assert got["cover"] == [{"lhs": ["sid"], "rhs": ["name", "major"]}]
