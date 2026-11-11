@@ -155,6 +155,7 @@ a {
   .nav {
     order: 3;
     width: 100%;
+    flex-wrap: wrap;
     gap: 0 var(--space-4);
   }
 }
