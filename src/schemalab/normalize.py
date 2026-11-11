@@ -103,7 +103,7 @@ def parse(schema: str, dependencies: str) -> tuple[list[str], list[FD]]:
             sides = _ARROW.split(part)
             if len(sides) != 2:
                 raise NormalizeError(f"line {number}: write a dependency as X -> Y.")
-            lhs, rhs = (_side(text, attrs, name, number) for text in sides)
+            lhs, rhs = (read_attrs(text, attrs, name, number) for text in sides)
             if not lhs:
                 raise NormalizeError(f"line {number}: the left side is empty.")
             if not rhs:
@@ -114,7 +114,8 @@ def parse(schema: str, dependencies: str) -> tuple[list[str], list[FD]]:
     return attrs, fds
 
 
-def _side(text: str, attrs: list[str], relation: str, line: int) -> Attrs:
+def read_attrs(text: str, attrs: list[str], relation: str, line: int = 1) -> Attrs:
+    """Attribute names separated by commas or spaces, or one-letter names run together."""
     out: set[str] = set()
     for token in re.split(r"[\s,]+", text.strip()):
         if not token:
