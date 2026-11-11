@@ -95,3 +95,32 @@ def test_names_that_need_quoting_are_quoted(tmp_path: Path) -> None:
         con.execute('INSERT INTO "order" VALUES (1), (2)')
     [pk] = by_kind(suggest(path, "order"), "primary key")
     assert pk.sql == 'ALTER TABLE "order" ADD PRIMARY KEY ("select");'
+
+
+def test_link_table_prefers_its_reference_pair_over_a_coincidence(tmp_path: Path) -> None:
+    # Live case: four enrollments whose grades happened to differ were offered grade as key.
+    path = tmp_path / "uni.duckdb"
+    with duckdb.connect(str(path)) as con:
+        con.execute(
+            "CREATE TABLE enrollments (student_id INTEGER, course_code VARCHAR, grade DECIMAL(3,1))"
+        )
+        con.execute(
+            "INSERT INTO enrollments VALUES"
+            " (1, 'A', 3.7), (1, 'B', 4.0), (2, 'A', 3.0), (3, 'B', 3.3)"
+        )
+        con.execute("COMMENT ON COLUMN enrollments.student_id IS 'references students(id)'")
+        con.execute("COMMENT ON COLUMN enrollments.course_code IS 'references courses(code)'")
+    found = suggest(path, "enrollments")
+    [pk] = by_kind(found, "primary key")
+    assert pk.columns == ["student_id", "course_code"]
+    assert not any("student_id >= 0" in s.sql for s in found)  # it already references students
+
+
+def test_a_unique_measurement_is_not_offered_as_a_key(tmp_path: Path) -> None:
+    path = tmp_path / "m.duckdb"
+    with duckdb.connect(str(path)) as con:
+        con.execute("CREATE TABLE readings (taken DATE, value DOUBLE, ratio DECIMAL(4,2))")
+        con.execute(
+            "INSERT INTO readings VALUES ('2024-01-01', 1.5, 0.1), ('2024-01-02', 2.5, 0.2)"
+        )
+    assert by_kind(suggest(path, "readings"), "primary key") == []

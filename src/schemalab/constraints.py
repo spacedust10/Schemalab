@@ -160,7 +160,7 @@ def _suggest(con: duckdb.DuckDBPyConnection, name: str, names: list[str]) -> lis
                 )
             )
     for c in t.columns:
-        if c.name in key or c.name in references:
+        if c.name in key or c.name in references or (c.note or "").startswith("references"):
             continue
         if c.numeric and c.low is not None and c.low >= 0:  # type: ignore[operator]
             out.append(
@@ -191,44 +191,61 @@ def _suggest(con: duckdb.DuckDBPyConnection, name: str, names: list[str]) -> lis
     return out
 
 
-def _primary_key(con: duckdb.DuckDBPyConnection, t: _Table, out: list[Suggestion]) -> list[str]:
-    def rank(c: _Column) -> tuple[int, int, int]:
-        lower = c.name.lower()
-        return (lower != "id", not lower.endswith("id"), not c.type.startswith(_INTEGER))
+_ID_NAME = re.compile(r"(^|_)(id|code|key|no|num|number|uuid|sku)$|id$", re.IGNORECASE)
 
-    singles = [c for c in t.columns if c.unique(t.rows) and not c.type.startswith(_KEYLESS)]
-    if singles:
-        best = min(singles, key=rank)
+
+def _key_type(c: _Column) -> bool:
+    """Whole numbers and text make keys; measurements, dates and flags do not."""
+    return c.type.startswith(_INTEGER) or c.type.startswith("VARCHAR") or c.type == "UUID"
+
+
+def _primary_key(con: duckdb.DuckDBPyConnection, t: _Table, out: list[Suggestion]) -> list[str]:
+    def rank(c: _Column) -> tuple[bool, bool, bool]:
+        return (
+            c.name.lower() != "id",
+            not _ID_NAME.search(c.name),
+            not c.type.startswith(_INTEGER),
+        )
+
+    def offer(cols: list[str], evidence: str) -> list[str]:
+        listed = ", ".join(q(c) for c in cols)
         out.append(
             Suggestion(
                 "primary key",
-                [best.name],
-                f"ALTER TABLE {q(t.name)} ADD PRIMARY KEY ({q(best.name)});",
-                f"All {t.rows:,} rows have a value, and no two are the same.",
+                cols,
+                f"ALTER TABLE {q(t.name)} ADD PRIMARY KEY ({listed});",
+                evidence,
             )
         )
-        return [best.name]
-    full = [
-        c
-        for c in t.columns[:PAIR_SEARCH]
-        if t.rows and c.non_null == t.rows and not c.type.startswith(_KEYLESS)
+        return cols
+
+    singles = sorted((c for c in t.columns if c.unique(t.rows) and _key_type(c)), key=rank)
+    if singles and _ID_NAME.search(singles[0].name):
+        return offer(
+            [singles[0].name], f"All {t.rows:,} rows have a value, and no two are the same."
+        )
+
+    # A pair of linking columns (recorded references or id-like names) beats a column that is
+    # unique only by chance, as in a small enrollments table whose grades happen to differ.
+    full = [c for c in t.columns[:PAIR_SEARCH] if t.rows and c.non_null == t.rows and _key_type(c)]
+    linking = [
+        c for c in full if (c.note or "").startswith("references") or _ID_NAME.search(c.name)
     ]
-    for a, b in combinations(full, 2):
-        pair = f"{q(a.name)}, {q(b.name)}"
-        (distinct,) = con.execute(
-            f"SELECT count(*) FROM (SELECT DISTINCT {pair} FROM {q(t.name)})"  # noqa: S608
-        ).fetchone() or (0,)
-        if distinct == t.rows:
-            out.append(
-                Suggestion(
-                    "primary key",
+    for group in (linking, full):
+        for a, b in combinations(group, 2):
+            pair = f"{q(a.name)}, {q(b.name)}"
+            (distinct,) = con.execute(
+                f"SELECT count(*) FROM (SELECT DISTINCT {pair} FROM {q(t.name)})"  # noqa: S608
+            ).fetchone() or (0,)
+            if distinct == t.rows:
+                return offer(
                     [a.name, b.name],
-                    f"ALTER TABLE {q(t.name)} ADD PRIMARY KEY ({pair});",
-                    f"No single column is unique, but every ({a.name}, {b.name}) pair "
-                    f"in the {t.rows:,} rows is.",
+                    f"Every ({a.name}, {b.name}) pair in the {t.rows:,} rows is different.",
                 )
-            )
-            return [a.name, b.name]
+    if singles:
+        return offer(
+            [singles[0].name], f"All {t.rows:,} rows have a value, and no two are the same."
+        )
     return []
 
 
