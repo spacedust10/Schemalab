@@ -586,6 +586,133 @@ pre.sql {
   color: var(--ink-2);
 }
 
+/* ER designer */
+.er-page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-7);
+  display: grid;
+  gap: var(--space-6);
+}
+.er-input {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 80ch;
+}
+.er-input > .button {
+  justify-self: start;
+}
+.er-sources {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+.er-sources details {
+  width: 100%;
+  display: grid;
+  gap: var(--space-3);
+}
+.er-sources summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+}
+.er-sources details[open] {
+  padding-bottom: var(--space-3);
+}
+.er-sources details > .button {
+  margin-top: var(--space-3);
+}
+.er-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3) var(--space-5);
+  margin-bottom: var(--space-3);
+}
+.er-bar h2 {
+  margin-right: auto;
+}
+.er-bar .source {
+  flex-basis: auto;
+}
+.er-dialect select {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.diagram {
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+.er {
+  display: block;
+  font: 13px var(--sans);
+}
+.er-lines line,
+.er-lines path {
+  stroke: var(--ink-2);
+  stroke-width: 1.3;
+}
+.er-box {
+  fill: var(--panel);
+  stroke: var(--ink);
+  stroke-width: 1.3;
+}
+.er-oval,
+.er-diamond,
+.er-hollow {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+.er-hollow {
+  stroke: var(--ink-2);
+}
+.er-rule {
+  stroke: var(--rule);
+}
+.er-title {
+  fill: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+}
+.er-attr {
+  fill: var(--ink);
+}
+.er-key {
+  font-weight: 700;
+}
+.er-type {
+  fill: var(--ink-2);
+  font: 12px var(--mono);
+}
+.er-label,
+.er-card {
+  fill: var(--ink);
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.er-card {
+  font-weight: 700;
+  font-size: 13px;
+}
+.er-ddl {
+  max-height: 32rem;
+  overflow: auto;
+}
+
 /* Normalize */
 .normalize {
   max-width: 1240px;

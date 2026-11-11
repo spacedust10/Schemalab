@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Normalize: give a relation and its functional dependencies, or start from an uploaded table, and get its keys, highest normal form with each violation explained, a BCNF decomposition with its steps, a 3NF synthesis, and chase proofs that both joins are lossless.
+- Design: write an ER design as text, draft one from an English description, or read it from CREATE TABLE statements or your uploaded tables. See it in Chen or crow's-foot notation and get the tables in PostgreSQL, MySQL, SQLite, SQL Server or Oracle.
 - The model now sees the values of short category columns ('Under 65 years', 'Airports') for the sample data, and for uploaded tables when the user ticks a box. Accuracy on the eval rose from 64.8% to 75.9%; see evals/RESULTS.md.
 - The category scan is bounded in memory and time, so a large upload cannot stall questions.
 
