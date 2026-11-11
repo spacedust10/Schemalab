@@ -181,3 +181,26 @@ def test_round_trip_through_ddl_keeps_the_design() -> None:
 def test_relationship_names_from_foreign_keys_drop_the_key_suffix() -> None:
     names = [r.name for r in from_ddl(to_ddl(parse(UNIVERSITY), "postgres")).relationships]
     assert "StudentProfessor" in names and "DepartmentProfessor" in names
+
+
+def test_a_table_without_a_key_linking_two_tables_is_many_to_many() -> None:
+    ddl = """
+    CREATE TABLE students (id INT PRIMARY KEY, name TEXT);
+    CREATE TABLE courses (code VARCHAR(10) PRIMARY KEY, title TEXT);
+    CREATE TABLE enrollments (student_id INT REFERENCES students(id),
+      course_code VARCHAR(10) REFERENCES courses(code), grade DECIMAL(3, 1));
+    """
+    model = from_ddl(ddl)
+    assert [e.name for e in model.entities] == ["Students", "Courses"]
+    [rel] = model.relationships
+    assert rel.kind == "M:N" and rel.name == "Enrollments"
+    assert [a.name for a in rel.attributes] == ["grade"]
+
+
+def test_a_table_without_a_key_uses_its_first_own_column() -> None:
+    ddl = """
+    CREATE TABLE teams (id INT PRIMARY KEY);
+    CREATE TABLE players (team_id INT REFERENCES teams(id), name TEXT, age INT);
+    """
+    players = from_ddl(ddl).entities[1]
+    assert [(a.name, a.key) for a in players.attributes] == [("name", True), ("age", False)]

@@ -415,7 +415,8 @@ def from_ddl(text: str) -> Model:
 
     def is_junction(p: _Parsed) -> bool:
         fk_cols = {c for cols, _ in p.foreign for c in cols}
-        return len(p.foreign) == 2 and bool(p.primary) and set(p.primary) == fk_cols
+        # Keyed by its two foreign keys, or with no key at all: an association table.
+        return len(p.foreign) == 2 and (not p.primary or set(p.primary) == fk_cols)
 
     entities: list[Entity] = []
     relationships: list[Relationship] = []
@@ -423,7 +424,8 @@ def from_ddl(text: str) -> Model:
         if is_junction(p):
             continue
         fk_cols = {c for cols, target in p.foreign if target in names for c in cols}
-        keys = set(p.primary) or {p.columns[0][0]}
+        own = [c for c, _ in p.columns if c not in fk_cols]
+        keys = set(p.primary) or {own[0] if own else p.columns[0][0]}
         attrs = [
             Attribute(c, _type_from_sql(t), c in keys)
             for c, t in p.columns
