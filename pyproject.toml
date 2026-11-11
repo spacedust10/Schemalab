@@ -50,6 +50,9 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
+# Relational algebra is written in its own symbols (σ, π, ⋈, −, ×).
+"src/schemalab/ra.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_ra.py" = ["RUF001", "RUF002", "RUF003"]
 # Tests assert, use fixed test passwords, and build fixture SQL from tmp paths.
 "tests/**" = ["S101", "S105", "S106", "S608"]
 
