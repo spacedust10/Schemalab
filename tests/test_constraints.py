@@ -114,6 +114,7 @@ def test_link_table_prefers_its_reference_pair_over_a_coincidence(tmp_path: Path
     [pk] = by_kind(found, "primary key")
     assert pk.columns == ["student_id", "course_code"]
     assert not any("student_id >= 0" in s.sql for s in found)  # it already references students
+    assert by_kind(found, "unique") == []  # four different grades prove nothing
 
 
 def test_a_unique_measurement_is_not_offered_as_a_key(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from schemalab.guards.engine import open_readonly
 TIMEOUT_S = 5.0  # per table scan
 MAX_CATEGORIES = 10
 PAIR_SEARCH = 8  # look for two-column keys among this many leading columns
+MIN_UNIQUE_ROWS = 20  # fewer rows than this can all differ by chance
 
 _NUMERIC = (
     "TINYINT",
@@ -145,11 +146,13 @@ def _suggest(con: duckdb.DuckDBPyConnection, name: str, names: list[str]) -> lis
                 )
             )
     for c in t.columns:
+        # A handful of rows can all differ by chance; ask for an id-like name or enough rows.
+        named = bool(_ID_NAME.search(c.name)) or "email" in c.name.lower()
         if (
             c.name not in key
-            and t.rows >= 2
+            and (t.rows >= MIN_UNIQUE_ROWS or (named and t.rows >= 2))
             and c.unique(t.rows)
-            and not c.type.startswith(_KEYLESS)
+            and _key_type(c)
         ):
             out.append(
                 Suggestion(
