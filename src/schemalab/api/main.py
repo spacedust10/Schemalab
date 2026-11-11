@@ -19,10 +19,12 @@ from schemalab.api.auth import router as auth_router
 from schemalab.api.corrections import router as corrections_router
 from schemalab.api.datasets import UploadsDir, get_db_path, user_db
 from schemalab.api.datasets import router as datasets_router
+from schemalab.api.er import router as er_router
+from schemalab.api.gateway import get_gateway
 from schemalab.api.normalize import router as normalize_router
 from schemalab.api.pins import router as pins_router
 from schemalab.config import Settings, get_settings
-from schemalab.llm import Gateway, NoModelsError, gateway_from_settings
+from schemalab.llm import Gateway
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +37,6 @@ class AskRequest(BaseModel):
     dataset: Literal["sample", "mine"] = "sample"
     # For "mine": let the model see the distinct values of short text columns.
     share_categories: bool = False
-
-
-def get_gateway(settings: Annotated[Settings, Depends(get_settings)]) -> Gateway:
-    try:
-        return gateway_from_settings(settings)
-    except NoModelsError as e:
-        # The details name config and env vars; they belong in the server log only.
-        logger.error("no usable model: %s", e)
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, "No language model is available right now."
-        ) from None
 
 
 def _sse(
@@ -75,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(datasets_router)
     app.include_router(pins_router)
     app.include_router(normalize_router)
+    app.include_router(er_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
