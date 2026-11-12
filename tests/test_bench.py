@@ -66,6 +66,23 @@ def test_a_failing_query_is_reported_not_raised(
 
 
 @needs_postgres
+def test_prepare_analyzes_only_its_own_tables(tmp_path: Path) -> None:
+    import psycopg
+
+    with psycopg.connect(DSN, autocommit=True) as pg:
+        pg.execute("DROP TABLE IF EXISTS public.bench_bystander")
+        pg.execute("CREATE TABLE public.bench_bystander AS SELECT 1 AS x")
+        pg.execute(f"DROP SCHEMA IF EXISTS {schema_name('tpch', 0.01)} CASCADE")
+    prepare(tmp_path / "fresh", DSN, "tpch", 0.01, lambda _: None)
+    with psycopg.connect(DSN, autocommit=True) as pg:
+        row = pg.execute(
+            "SELECT last_analyze FROM pg_stat_user_tables WHERE relname = 'bench_bystander'"
+        ).fetchone()
+        pg.execute("DROP TABLE public.bench_bystander")
+    assert row is not None and row[0] is None
+
+
+@needs_postgres
 def test_lab_users_cannot_read_the_benchmark_schema(tmp_path: Path) -> None:
     from schemalab.lab.session import Lab
 

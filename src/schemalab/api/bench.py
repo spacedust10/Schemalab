@@ -1,6 +1,7 @@
 """The DuckDB vs PostgreSQL benchmark: one run at a time on the server, results shared."""
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -15,6 +16,8 @@ from schemalab.api.lab import LabDsn
 from schemalab.config import get_settings
 
 router = APIRouter(prefix="/bench", tags=["bench"])
+logger = logging.getLogger(__name__)
+OPEN_SCALE = 0.01  # seconds of work; anything larger needs an operator
 
 
 def get_bench_dir() -> Path:
@@ -22,6 +25,13 @@ def get_bench_dir() -> Path:
 
 
 BenchDir = Annotated[Path, Depends(get_bench_dir)]
+
+
+def get_bench_operators() -> list[str]:
+    return [e.lower() for e in get_settings().bench_operators]
+
+
+Operators = Annotated[list[str], Depends(get_bench_operators)]
 
 _job: dict[str, Any] = {
     "running": False,
@@ -52,10 +62,14 @@ def _work(root: Path, dsn: str, name: str, sf: float) -> None:
         result = bench.run(root, dsn, name, sf, progress=say)
         path = _results_path(root, name, sf)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(result))
+        partial = path.with_suffix(".partial")
+        partial.write_text(json.dumps(result))
+        partial.replace(path)
         _job["error"] = None
-    except Exception as e:
-        _job["error"] = str(e).splitlines()[0] if str(e) else type(e).__name__
+    except Exception:
+        # The text can carry the DSN or server internals; it goes to the log, not to users.
+        logger.exception("benchmark %s at scale %s failed", name, sf)
+        _job["error"] = "The benchmark failed; the server log has the details."
     finally:
         _job["running"] = False
 
@@ -70,9 +84,11 @@ def wait_for_job(timeout_s: float) -> None:
 @router.get("")
 def overview(user: UserDep, root: BenchDir) -> dict[str, Any]:
     results = []
-    folder = root / "results"
-    if folder.exists():
-        results = [json.loads(p.read_text()) for p in sorted(folder.glob("*.json"))]
+    for p in sorted((root / "results").glob("*.json")):
+        try:
+            results.append(json.loads(p.read_text()))
+        except (OSError, json.JSONDecodeError):
+            logger.warning("skipping unreadable benchmark result %s", p)
     return {
         "benchmarks": [
             {"id": k, "name": b.name, "scales": list(b.scales)} for k, b in bench.BENCHMARKS.items()
@@ -83,7 +99,9 @@ def overview(user: UserDep, root: BenchDir) -> dict[str, Any]:
 
 
 @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
-def start(user: UserDep, body: RunRequest, root: BenchDir, dsn: LabDsn) -> dict[str, Any]:
+def start(
+    user: UserDep, body: RunRequest, root: BenchDir, dsn: LabDsn, operators: Operators
+) -> dict[str, Any]:
     global _thread
     if not dsn:
         raise HTTPException(
@@ -94,6 +112,11 @@ def start(user: UserDep, body: RunRequest, root: BenchDir, dsn: LabDsn) -> dict[
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"Choose a scale from {list(bench.BENCHMARKS[body.benchmark].scales)}.",
+        )
+    if body.scale != OPEN_SCALE and user["email"].lower() not in operators:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Scale {OPEN_SCALE:g} is open to everyone; larger scales need an operator account.",
         )
     with _job_lock:
         if _job["running"]:

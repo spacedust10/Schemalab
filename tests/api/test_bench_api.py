@@ -22,6 +22,7 @@ needs_postgres = pytest.mark.skipif(not DSN, reason="set LAB_TEST_DSN")
 def bench_client(app: FastAPI, client: TestClient, tmp_path: Path) -> Iterator[TestClient]:
     app.dependency_overrides[get_lab_dsn] = lambda: DSN
     app.dependency_overrides[bench_api.get_bench_dir] = lambda: tmp_path / "bench"
+    app.dependency_overrides[bench_api.get_bench_operators] = lambda: ["ada@umich.edu"]
     yield client
     bench_api.wait_for_job(timeout_s=120)
 
@@ -45,6 +46,34 @@ def test_unknown_scale_is_refused(bench_client: TestClient) -> None:
         "/bench/run", json={"benchmark": "tpch", "scale": 5}, headers=register(bench_client)
     )
     assert resp.status_code == 400 and "scale" in resp.json()["detail"]
+
+
+def test_larger_scales_are_for_operators_only(bench_client: TestClient) -> None:
+    headers = register(bench_client, "grace@umich.edu")
+    resp = bench_client.post(
+        "/bench/run", json={"benchmark": "tpch", "scale": 1.0}, headers=headers
+    )
+    assert resp.status_code == 403 and "0.01" in resp.json()["detail"]
+
+
+def test_a_failed_run_shows_a_fixed_message_not_the_exception(
+    bench_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def boom(*_: Any) -> None:
+        raise RuntimeError("connection to postgresql://postgres:secret@labdb failed")
+
+    monkeypatch.setattr(bench_api.bench, "prepare", boom)
+    bench_api._work(tmp_path, "dsn", "tpch", 0.01)
+    assert bench_api._job["error"] == "The benchmark failed; the server log has the details."
+    assert "secret" not in str(bench_api._job)
+
+
+def test_a_broken_results_file_is_skipped(bench_client: TestClient, tmp_path: Path) -> None:
+    folder = tmp_path / "bench" / "results"
+    folder.mkdir(parents=True)
+    (folder / "tpch_sf0_01.json").write_text('{"benchmark": "tp')
+    got = bench_client.get("/bench", headers=register(bench_client))
+    assert got.status_code == 200 and got.json()["results"] == []
 
 
 def test_without_a_database_says_so(app: FastAPI, client: TestClient) -> None:

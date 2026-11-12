@@ -142,8 +142,8 @@ def prepare(root: Path, dsn: str, bench: str, sf: float, progress: Progress) -> 
                 with pg.cursor().copy(copy) as cp, csv_path.open("rb") as f:
                     while chunk := f.read(1 << 20):
                         cp.write(chunk)
+                pg.execute(sql.SQL("ANALYZE {}.{}").format(ident, sql.Identifier(table)))
                 progress(f"Loaded {table} ({n} of {len(tables)}).")
-        pg.execute(sql.SQL("ANALYZE"))
         pg.execute(sql.SQL("COMMENT ON SCHEMA {} IS {}").format(ident, sql.Literal(READY)))
 
 
