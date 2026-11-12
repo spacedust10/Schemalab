@@ -115,7 +115,7 @@ function describe(spec: Extract<ChartSpec, { kind: "bar" | "line" }>): string {
   return `Line chart of ${spec.measure} by ${spec.dimension}, from ${fmt(a?.y)} at ${a?.x} to ${fmt(b?.y)} at ${b?.x}.`;
 }
 
-function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+export function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
   const [width, setWidth] = useState(0);
   useEffect(() => {
     const el = ref.current;
@@ -127,7 +127,7 @@ function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
   return width;
 }
 
-function useTokens(): Tokens {
+export function useTokens(): Tokens {
   const read = (): Tokens => {
     const s = getComputedStyle(document.documentElement);
     const v = (name: string) => s.getPropertyValue(name).trim();
