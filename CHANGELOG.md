@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Transaction lab: two real PostgreSQL sessions per user in a sandbox database, with live transaction states, who waits for whom, the lock table and row versions (xmin, xmax). Nine guided scenarios: non-repeatable read, REPEATABLE READ's snapshot, phantom read, lost update, SELECT ... FOR UPDATE, serialization failure, write skew, SERIALIZABLE and deadlock.
 - Algebra: write relational algebra (σ π ρ γ τ ⋈ × ∪ − ∩, or words) or SQL, get the other form and the query tree, and run it on the sample data or your tables through the SQL guard.
 - Constraint coach: on Your data, each table can list the constraints its data already satisfies (keys, foreign keys, NOT NULL, UNIQUE, CHECKs), with the evidence and ALTER TABLE statements.
 - Normalize: give a relation and its functional dependencies, or start from an uploaded table, and get its keys, highest normal form with each violation explained, a BCNF decomposition with its steps, a 3NF synthesis, and chase proofs that both joins are lossless.
