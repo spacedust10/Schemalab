@@ -47,7 +47,7 @@ RESERVED = {
     "or", "order", "primary", "references", "select", "table", "union", "user", "values",
     "where",
 }  # fmt: skip
-MAX_ENTITIES = 40
+MAX_ENTITIES = 100  # as many as an upload can hold (uploads.MAX_TABLES)
 
 Card = Literal["1", "N"]
 
@@ -209,7 +209,7 @@ def parse(text: str) -> Model:
             raise ERError(f"line {line}: start a line with entity, relationship or isa.")
     subtypes = {c for sp in specializations for c in sp.children}
     for e in entities:
-        if not e.keys and e.name not in subtypes:
+        if not e.keys and e.name not in subtypes and not e.weak:
             raise ERError(
                 f"line {lines[e.name]}: {e.name} has no key attribute; mark one with key."
             )
@@ -292,7 +292,7 @@ def _attributes(body: str, line: int, keys: bool = True) -> list[Attribute]:
             words = words[:-1]
         if len(words) < 2 or not re.fullmatch(_NAME, words[0]):
             raise ERError(f"line {line}: write an attribute as name type, like sid int.")
-        name = _check_name(words[0], line)
+        name = words[0]  # reserved words are fine here; the DDL quotes them
         if any(a.name == name for a in attrs):
             raise ERError(f"line {line}: {name} appears twice.")
         attrs.append(Attribute(name, _type(" ".join(words[1:]), line), is_key))
@@ -377,12 +377,14 @@ class _Table:
     depends: set[str] = field(default_factory=set)
 
     def add(self, name: str, definition: str) -> str:
+        """Adds a column and returns its name as SQL, quoted if it is a reserved word."""
         unique, n = name, 2
         while unique in self.names:
             unique, n = f"{name}_{n}", n + 1
         self.names.append(unique)
-        self.columns.append(f"{unique} {definition}")
-        return unique
+        sql_name = f'"{unique}"' if unique.lower() in RESERVED else unique
+        self.columns.append(f"{sql_name} {definition}")
+        return sql_name
 
     def sql(self) -> str:
         return f"CREATE TABLE {self.name} ({', '.join(self.columns + self.constraints)})"
@@ -393,12 +395,11 @@ def to_ddl(model: Model, dialect: str = "postgres") -> str:
         raise ERError(f"Choose one of: {', '.join(DIALECTS)}.")
     by_name = {e.name: e for e in model.entities}
     supertype = {c: sp for sp in model.specializations for c in sp.children}
-    owners = {
-        weak.entity: (r, owner.entity)
-        for r in model.relationships
-        if r.identifying
-        for owner, weak in [_weak_end(r, by_name)]
-    }
+    owners: dict[str, list[tuple[Relationship, str]]] = {}
+    for r in model.relationships:
+        if r.identifying:
+            owner, weak = _weak_end(r, by_name)
+            owners.setdefault(weak.entity, []).append((r, owner.entity))
     tables: dict[str, _Table] = {}
     # Each entity's full key: (column name in its table, attribute), its owner's or
     # supertype's key first.
@@ -434,18 +435,18 @@ def to_ddl(model: Model, dialect: str = "postgres") -> str:
                 ref.append(kind)
             refs.append((cols, sp.parent, ref, " ON DELETE CASCADE"))
         elif name in owners:
-            _, owner = owners[name]
-            build(owner, seen | {name})
-            owner_keys = key_cols[owner]
-            cols = [t.add(c, _column_type(a, True) + " NOT NULL") for c, a in owner_keys]
-            borrowed = [(c, a) for c, (_, a) in zip(cols, owner_keys, strict=True)]
-            refs.append((cols, owner, [c for c, _ in owner_keys], " ON DELETE CASCADE"))
+            for _, owner in owners[name]:
+                build(owner, seen | {name})
+                owner_keys = key_cols[owner]
+                cols = [t.add(c, _column_type(a, True) + " NOT NULL") for c, a in owner_keys]
+                borrowed += [(c, a) for c, (_, a) in zip(cols, owner_keys, strict=True)]
+                refs.append((cols, owner, [c for c, _ in owner_keys], " ON DELETE CASCADE"))
         own = [
             (t.add(a.name, _column_type(a, a.key) + (" NOT NULL" if a.key else "")), a)
             for a in e.attributes
         ]
-        if name in owners:
-            for a in owners[name][0].attributes:
+        for r, _ in owners.get(name, []):
+            for a in r.attributes:
                 t.add(a.name, a.type)
         key_cols[name] = borrowed + [(c, a) for c, a in own if a.key and not sp]
         if not sp and not key_cols[name]:
@@ -619,6 +620,13 @@ def from_ddl(text: str) -> Model:
 
     for s in statements:
         if isinstance(s, exp.Alter) and (altered := by_name.get(resolve(_key(s.this)))):
+            for action in s.args.get("actions") or []:
+                if isinstance(action, exp.ColumnDef):
+                    kind = action.args.get("kind")
+                    altered.columns.append((action.name, kind.sql() if kind else "TEXT"))
+                elif isinstance(action, exp.Drop) and action.args.get("kind") == "COLUMN":
+                    gone = {c.name.lower() for c in action.args.get("tables") or []}
+                    altered.columns = [c for c in altered.columns if c[0].lower() not in gone]
             for pk in s.find_all(exp.PrimaryKey):
                 altered.primary.extend(i.name for i in pk.expressions)
             for fk in s.find_all(exp.ForeignKey):
@@ -650,10 +658,14 @@ def from_ddl(text: str) -> Model:
         plain = camel(p.label)
         display[p.name] = plain if plain not in display.values() else camel(p.schema) + plain
 
+    referenced = {t for q in parsed for _, t, _ in q.foreign if t != q.name}
+
     def is_junction(p: _Parsed) -> bool:
         fk_cols = {c for cols, _, _ in p.foreign for c in cols}
-        # Keyed by its two foreign keys, or with no key at all: an association table.
-        return len(p.foreign) == 2 and (not p.primary or set(p.primary) == fk_cols)
+        # Keyed by its two foreign keys, or with no key at all: an association table. One that
+        # other tables reference is an associative entity instead, since only entities can be.
+        keyed = not p.primary or set(p.primary) == fk_cols
+        return len(p.foreign) == 2 and keyed and p.name not in referenced
 
     def ref_cols(target: str, ref: list[str]) -> list[str]:
         return ref or by_table[target].primary

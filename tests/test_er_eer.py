@@ -192,3 +192,74 @@ def test_a_bracket_in_postgres_sql_does_not_mean_sql_server() -> None:
         "CREATE TABLE b (id INT PRIMARY KEY, a_id INT REFERENCES a(id));"
     )
     assert [e.name for e in m.entities] == ["A", "B"] and len(m.relationships) == 1
+
+
+def test_reserved_words_work_as_attribute_names_and_are_quoted_in_ddl() -> None:
+    # Real tables have columns like "group" (AdventureWorks' SalesTerritory).
+    m = parse('entity Territory { id int key, "group" text, order int }'.replace('"', ""))
+    assert [a.name for a in m.entities[0].attributes] == ["id", "group", "order"]
+    for dialect in ("postgres", "mysql", "sqlite", "tsql", "oracle"):
+        ddl = to_ddl(m, dialect)
+        assert "group" in ddl.lower()
+    con = sqlite3.connect(":memory:")
+    con.executescript(to_ddl(m, "sqlite"))
+    assert [r[1] for r in con.execute("PRAGMA table_info(territory)")] == ["id", "group", "order"]
+    assert parse(to_text(m)) == m
+
+
+ORDERS = """
+CREATE TABLE offer (offerid INT PRIMARY KEY);
+CREATE TABLE product (productid INT PRIMARY KEY);
+CREATE TABLE offerproduct (offerid INT REFERENCES offer, productid INT REFERENCES product,
+  PRIMARY KEY (offerid, productid));
+CREATE TABLE orderline (lineid INT PRIMARY KEY, offerid INT NOT NULL, productid INT NOT NULL,
+  FOREIGN KEY (offerid, productid) REFERENCES offerproduct (offerid, productid));
+"""
+
+
+def test_a_link_table_that_others_reference_is_an_associative_entity() -> None:
+    m = from_ddl(ORDERS)
+    link = entity(m, "Offerproduct")
+    assert link.weak and link.attributes == []  # identified by its two owners alone
+    kinds = {r.name: (r.identifying, r.kind) for r in m.relationships}
+    assert kinds == {
+        "OfferOfferproduct": (True, "1:N"),
+        "ProductOfferproduct": (True, "1:N"),
+        "OfferproductOrderline": (False, "1:N"),
+    }
+    assert parse(to_text(m)) == m
+
+
+def test_a_weak_entity_with_two_owners_takes_both_keys() -> None:
+    m = from_ddl(ORDERS)
+    con = sqlite3.connect(":memory:")
+    con.executescript(to_ddl(m, "sqlite"))
+    pk = [
+        r[1]
+        for r in sorted(con.execute("PRAGMA table_info(offerproduct)"), key=lambda r: r[5])
+        if r[5]
+    ]
+    assert pk == ["offerid", "productid"]
+
+
+def test_columns_added_and_dropped_by_alter_table_count() -> None:
+    m = from_ddl(
+        "CREATE TABLE doc (old_id INT, title TEXT, level INT);"
+        "ALTER TABLE doc DROP COLUMN level;"
+        "ALTER TABLE doc ADD node VARCHAR DEFAULT '/';"
+        "ALTER TABLE doc ADD CONSTRAINT pk_doc PRIMARY KEY (node);"
+    )
+    assert [(a.name, a.key) for a in m.entities[0].attributes] == [
+        ("old_id", False),
+        ("title", False),
+        ("node", True),
+    ]
+
+
+def test_a_design_can_hold_every_table_an_upload_can() -> None:
+    from schemalab.er import MAX_ENTITIES
+    from schemalab.uploads import MAX_TABLES
+
+    assert MAX_ENTITIES >= MAX_TABLES
+    text = "\n".join(f"entity E{i} {{ id int key }}" for i in range(MAX_TABLES))
+    assert len(parse(text).entities) == MAX_TABLES
