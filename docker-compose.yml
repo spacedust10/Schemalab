@@ -15,6 +15,20 @@ services:
       interval: 5s
       retries: 10
 
+  # Transaction lab sandbox: runs users' SQL, so it holds nothing else and has no host port.
+  # No volume: its data is disposable.
+  labdb:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: ${LAB_DB_PASSWORD:-lab}
+      POSTGRES_DB: lab
+    command: ["postgres", "-c", "deadlock_timeout=1s", "-c", "max_connections=60"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab"]
+      interval: 5s
+      retries: 10
+
   api:
     build: { context: ., dockerfile: Dockerfile.api }
     environment:
@@ -23,11 +37,13 @@ services:
       SCHEMALAB_OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://host.docker.internal:11434}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SCHEMALAB_LAB_ADMIN_DSN: postgresql://lab:${LAB_DB_PASSWORD:-lab}@labdb:5432/lab
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes: ["./data/samples:/app/data/samples:ro", "uploads:/app/data/uploads"]
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
     depends_on:
       postgres: { condition: service_healthy }
+      labdb: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s

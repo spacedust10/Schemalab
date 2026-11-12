@@ -88,3 +88,13 @@ def test_ci_runs_the_lab_tests_against_postgres() -> None:
     job = load(".github/workflows/ci.yml")["jobs"]["python"]
     assert job["services"]["postgres"]["image"].startswith("postgres:17")
     assert job["env"]["LAB_TEST_DSN"].startswith("postgresql://")
+
+
+def test_lab_database_is_reachable_only_by_the_api() -> None:
+    # The lab runs users' SQL; its database must not be published on the host.
+    compose = load("docker-compose.yml")
+    lab = compose["services"]["labdb"]
+    assert "ports" not in lab and lab["image"].startswith("postgres:17")
+    env = compose["services"]["api"]["environment"]
+    assert env["SCHEMALAB_LAB_ADMIN_DSN"].startswith("postgresql://")
+    assert "@labdb:5432/" in env["SCHEMALAB_LAB_ADMIN_DSN"]

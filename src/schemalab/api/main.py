@@ -22,6 +22,7 @@ from schemalab.api.datasets import UploadsDir, get_db_path, user_db
 from schemalab.api.datasets import router as datasets_router
 from schemalab.api.er import router as er_router
 from schemalab.api.gateway import get_gateway
+from schemalab.api.lab import router as lab_router
 from schemalab.api.normalize import router as normalize_router
 from schemalab.api.pins import router as pins_router
 from schemalab.config import Settings, get_settings
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(normalize_router)
     app.include_router(er_router)
     app.include_router(algebra_router)
+    app.include_router(lab_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

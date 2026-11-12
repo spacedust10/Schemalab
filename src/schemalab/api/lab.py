@@ -1,0 +1,143 @@
+"""The transaction lab over HTTP: start, run in session A or B, poll, inspect, scenarios.
+
+Labs live in this process: one per user, at most MAX_LABS at a time, closed after IDLE_S
+without use. Each holds two PostgreSQL connections in the sandbox database.
+"""
+
+import threading
+import time
+from dataclasses import asdict
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, StringConstraints
+from starlette.concurrency import run_in_threadpool
+
+from schemalab.api.auth import UserDep
+from schemalab.config import get_settings
+from schemalab.lab.guard import LabSQLError
+from schemalab.lab.scenarios import BY_ID, SCENARIOS
+from schemalab.lab.session import Lab
+
+router = APIRouter(prefix="/lab", tags=["lab"])
+
+MAX_LABS = 20
+IDLE_S = 20 * 60
+Session = Literal["A", "B"]
+
+_labs: dict[int, Lab] = {}
+_labs_lock = threading.Lock()
+
+
+def get_lab_dsn() -> str:
+    return get_settings().lab_admin_dsn
+
+
+LabDsn = Annotated[str, Depends(get_lab_dsn)]
+
+
+class RunRequest(BaseModel):
+    session: Session
+    sql: Annotated[str, StringConstraints(max_length=5000)]
+
+
+class ScenarioRequest(BaseModel):
+    id: Annotated[str, StringConstraints(max_length=100)]
+
+
+def close_all() -> None:
+    with _labs_lock:
+        labs = list(_labs.values())
+        _labs.clear()
+    for lab in labs:
+        lab.close()
+
+
+def _expire() -> None:
+    """Close labs idle too long, and the least recently used one if there is no room."""
+    now = time.monotonic()
+    with _labs_lock:
+        stale = [uid for uid, lab in _labs.items() if now - lab.last_used > IDLE_S]
+        if len(_labs) - len(stale) >= MAX_LABS:
+            stale.append(min(_labs, key=lambda uid: _labs[uid].last_used))
+        closing = [_labs.pop(uid) for uid in dict.fromkeys(stale) if uid in _labs]
+    for lab in closing:
+        lab.close()
+
+
+def _lab(user: dict[str, Any]) -> Lab:
+    lab = _labs.get(int(user["id"]))
+    if lab is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Start the lab first.")
+    lab.last_used = time.monotonic()
+    return lab
+
+
+def _start(user: dict[str, Any], dsn: str) -> Lab:
+    if not dsn:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "The transaction lab is not set up on this server."
+        )
+    _expire()
+    uid = int(user["id"])
+    existing = _labs.get(uid)
+    if existing is not None:
+        existing.reset()
+        existing.last_used = time.monotonic()
+        return existing
+    lab = Lab(dsn, uid)
+    lab.start()
+    with _labs_lock:
+        _labs[uid] = lab
+    return lab
+
+
+@router.post("/start")
+async def start(user: UserDep, dsn: LabDsn) -> dict[str, Any]:
+    lab = await run_in_threadpool(_start, user, dsn)
+    return await run_in_threadpool(lab.state)
+
+
+@router.post("/stop", status_code=status.HTTP_204_NO_CONTENT)
+def stop(user: UserDep) -> None:
+    with _labs_lock:
+        lab = _labs.pop(int(user["id"]), None)
+    if lab is not None:
+        lab.close()
+
+
+@router.post("/run")
+def run(user: UserDep, body: RunRequest) -> dict[str, Any]:
+    lab = _lab(user)
+    try:
+        return lab.run(body.session, body.sql)
+    except LabSQLError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    except RuntimeError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+
+
+@router.get("/result")
+def result(user: UserDep, session: Annotated[Session, Query()]) -> dict[str, Any]:
+    return _lab(user).result(session) or {"state": "idle"}
+
+
+@router.get("/state")
+def lab_state(user: UserDep) -> dict[str, Any]:
+    return _lab(user).state()
+
+
+@router.get("/scenarios")
+def scenarios(user: UserDep) -> list[dict[str, str]]:
+    return [{"id": s.id, "title": s.title, "summary": s.summary} for s in SCENARIOS]
+
+
+@router.post("/scenario")
+async def scenario(user: UserDep, body: ScenarioRequest, dsn: LabDsn) -> dict[str, Any]:
+    chosen = BY_ID.get(body.id)
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such scenario.")
+    lab = await run_in_threadpool(_start, user, dsn)
+    for statement in chosen.setup:
+        await run_in_threadpool(lab.run, "A", statement)
+    return asdict(chosen)

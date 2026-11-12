@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     share_sample_categories: bool = True
     # Accounts and history. Compose points this at Postgres.
     database_url: str = "sqlite:///data/app.db"
+    # Transaction lab: a superuser DSN for a separate, disposable Postgres. Empty turns it off.
+    lab_admin_dsn: str = ""
 
 
 @lru_cache
