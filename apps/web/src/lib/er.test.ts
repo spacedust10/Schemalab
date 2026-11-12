@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ERModel, chenLayout, crowEnds, crowLayout, entityOrder } from "./er";
+import { type Box, type ERModel, chenLayout, crowEnds, crowLabels, crowLayout, entityOrder, inheritsFrom, layers } from "./er";
 
 const attr = (name: string, key = false) => ({ name, type: "INT", key });
 const UNI: ERModel = {
@@ -82,6 +82,83 @@ describe("layout", () => {
     };
     const l = chenLayout(self);
     expect(l.diamonds.Manages.x).toBeGreaterThan(l.entities.Employee.x);
+  });
+});
+
+// The report's schema, as /er/ddl reads it: two weak entities and a disjoint, total ISA.
+const v20 = (name: string, key = false) => ({ name, type: "VARCHAR(20)", key });
+const end = (entity: string, card: "1" | "N", total = false) => ({ entity, card, total });
+const USERS: ERModel = {
+  entities: [
+    { name: "Departments", attributes: [v20("deptname", true), v20("deptaddr")], weak: false },
+    { name: "Units", attributes: [v20("unitid", true), v20("unitaddr")], weak: true },
+    { name: "Users", attributes: [v20("userid", true), v20("useraddr")], weak: true },
+    { name: "VerifiedUsers", attributes: [v20("pin")], weak: false },
+    { name: "UnverifiedUsers", attributes: [], weak: false },
+  ],
+  relationships: [
+    { name: "DepartmentsUnits", kind: "1:N", left: end("Departments", "1"), right: end("Units", "N", true), attributes: [], identifying: true },
+    { name: "UnitsUsers", kind: "1:N", left: end("Units", "1"), right: end("Users", "N", true), attributes: [], identifying: true },
+    { name: "UnverifiedUsersR3", kind: "1:N", left: end("VerifiedUsers", "1"), right: end("UnverifiedUsers", "N", true), attributes: [], identifying: false },
+  ],
+  specializations: [{ parent: "Users", children: ["VerifiedUsers", "UnverifiedUsers"], disjoint: true, total: true, discriminator: "user_type" }],
+};
+
+const overlaps = (a: Box, b: Box) => !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+
+/** Does segment p-q pass through box b (shrunk a little, so touching an edge does not count)? */
+function crosses(p: { x: number; y: number }, q: { x: number; y: number }, b: Box): boolean {
+  for (let i = 1; i < 50; i++) {
+    const x = p.x + ((q.x - p.x) * i) / 50;
+    const y = p.y + ((q.y - p.y) * i) / 50;
+    if (x > b.x + 2 && x < b.x + b.w - 2 && y > b.y + 2 && y < b.y + b.h - 2) return true;
+  }
+  return false;
+}
+
+describe("enhanced ER layout", () => {
+  it("puts owners and supertypes above what depends on them, and subtypes on one row", () => {
+    expect(layers(USERS)).toEqual({ Departments: 0, Units: 1, Users: 2, VerifiedUsers: 3, UnverifiedUsers: 3 });
+    const l = crowLayout(USERS);
+    expect(l.boxes.VerifiedUsers.y).toBe(l.boxes.UnverifiedUsers.y);
+    expect(l.boxes.Departments.y).toBeLessThan(l.boxes.Units.y);
+  });
+
+  it("names what a weak entity or subtype takes its key from", () => {
+    expect(inheritsFrom(USERS, "Units")).toBe("Departments");
+    expect(inheritsFrom(USERS, "VerifiedUsers")).toBe("Users");
+    expect(inheritsFrom(USERS, "Departments")).toBeNull();
+  });
+
+  for (const [label, model] of [["users", USERS], ["university", UNI]] as const) {
+    it(`draws no relationship line through a third box (${label})`, () => {
+      const l = crowLayout(model);
+      const mid = (b: Box) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+      for (const r of model.relationships) {
+        if (r.left.entity === r.right.entity) continue;
+        for (const [name, b] of Object.entries(l.boxes)) {
+          if (name === r.left.entity || name === r.right.entity) continue;
+          expect(crosses(mid(l.boxes[r.left.entity]), mid(l.boxes[r.right.entity]), b), `${r.name} crosses ${name}`).toBe(false);
+        }
+      }
+    });
+
+    it(`keeps relationship labels off boxes and off each other (${label})`, () => {
+      const l = crowLayout(model);
+      const labels = Object.values(crowLabels(model, l));
+      expect(labels.length).toBe(model.relationships.filter((r) => r.left.entity !== r.right.entity).length);
+      for (const [i, a] of labels.entries()) {
+        for (const b of Object.values(l.boxes)) expect(overlaps(a, b)).toBe(false);
+        for (const b of labels.slice(i + 1)) expect(overlaps(a, b)).toBe(false);
+      }
+    });
+  }
+
+  it("puts each Chen ISA circle between the supertype and its subtypes", () => {
+    const l = chenLayout(USERS);
+    const c = l.isa.Users;
+    expect(c.y).toBeGreaterThan(l.entities.Users.y);
+    expect(c.y).toBeLessThan(l.entities.VerifiedUsers.y);
   });
 });
 

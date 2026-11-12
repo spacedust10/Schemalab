@@ -998,8 +998,23 @@ td.tone-medium {
 .er-hollow {
   stroke: var(--ink-2);
 }
+.er-lines .er-dashed {
+  stroke-dasharray: 6 4;
+}
+.er-lines .er-none,
+.er-none {
+  fill: none;
+}
+.er-inherit {
+  fill: var(--ink-2);
+  font-style: italic;
+  font-size: 12px;
+}
 .er-rule {
   stroke: var(--rule);
+}
+.er-rule-ink {
+  stroke: var(--ink);
 }
 .er-title {
   fill: var(--ink);
