@@ -103,11 +103,6 @@ def start(
     user: UserDep, body: RunRequest, root: BenchDir, dsn: LabDsn, operators: Operators
 ) -> dict[str, Any]:
     global _thread
-    if not dsn:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "The benchmark database is not set up on this server.",
-        )
     if body.scale not in bench.BENCHMARKS[body.benchmark].scales:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -117,6 +112,11 @@ def start(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"Scale {OPEN_SCALE:g} is open to everyone; larger scales need an operator account.",
+        )
+    if not dsn:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The benchmark database is not set up on this server.",
         )
     with _job_lock:
         if _job["running"]:
