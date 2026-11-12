@@ -98,3 +98,15 @@ def test_lab_database_is_reachable_only_by_the_api() -> None:
     env = compose["services"]["api"]["environment"]
     assert env["SCHEMALAB_LAB_ADMIN_DSN"].startswith("postgresql://")
     assert "@labdb:5432/" in env["SCHEMALAB_LAB_ADMIN_DSN"]
+
+
+def test_lab_database_sits_on_its_own_internal_network() -> None:
+    # The sandbox runs users' SQL: it must not share a network with the app database or reach
+    # the internet. Only the API joins both networks.
+    compose = load("docker-compose.yml")
+    services = compose["services"]
+    assert compose["networks"]["lab"]["internal"] is True
+    assert services["labdb"]["networks"] == ["lab"]
+    assert "lab" not in services["postgres"]["networks"]
+    assert "lab" not in services["web"]["networks"]
+    assert set(services["api"]["networks"]) == {"app", "lab"}

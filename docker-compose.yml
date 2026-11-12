@@ -10,6 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-schemalab}
       POSTGRES_DB: schemalab
     volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [app]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U schemalab"]
       interval: 5s
@@ -24,6 +25,7 @@ services:
       POSTGRES_PASSWORD: ${LAB_DB_PASSWORD:-lab}
       POSTGRES_DB: lab
     command: ["postgres", "-c", "deadlock_timeout=1s", "-c", "max_connections=60"]
+    networks: [lab]  # internal: only the API can reach it, and it cannot reach out
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lab"]
       interval: 5s
@@ -41,6 +43,7 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes: ["./data/samples:/app/data/samples:ro", "uploads:/app/data/uploads"]
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
+    networks: [app, lab]
     depends_on:
       postgres: { condition: service_healthy }
       labdb: { condition: service_healthy }
@@ -54,8 +57,13 @@ services:
     environment:
       API_URL: http://api:8000
     ports: ["127.0.0.1:${WEB_PORT:-3000}:3000"]
+    networks: [app]
     depends_on:
       api: { condition: service_healthy }
+
+networks:
+  app: {}
+  lab: { internal: true }
 
 volumes:
   pgdata:
