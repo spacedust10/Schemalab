@@ -81,3 +81,10 @@ def test_api_keeps_uploads_in_a_named_volume_it_owns() -> None:
     dockerfile = (ROOT / "Dockerfile.api").read_text()
     assert "chown app /app/data/uploads" in dockerfile
     assert dockerfile.index("chown app /app/data/uploads") < dockerfile.index("USER app")
+
+
+def test_ci_runs_the_lab_tests_against_postgres() -> None:
+    # The lab tests skip without LAB_TEST_DSN; CI must provide it so they never silently skip.
+    job = load(".github/workflows/ci.yml")["jobs"]["python"]
+    assert job["services"]["postgres"]["image"].startswith("postgres:17")
+    assert job["env"]["LAB_TEST_DSN"].startswith("postgresql://")
