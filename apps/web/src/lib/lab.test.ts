@@ -50,3 +50,21 @@ describe("lab routes", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("xmaxLabel", async () => {
+  const { xmaxLabel } = await import("./lab");
+  const sessions = {
+    A: { pid: 1, transaction: "in transaction", xid: "771", blocked_by: [] },
+    B: { pid: 2, transaction: "idle", xid: null, blocked_by: [] },
+  };
+
+  it("names the open transaction that is changing or locking the row", () => {
+    expect(xmaxLabel("771", sessions)).toEqual({ text: "771 · A's open transaction", live: true });
+  });
+
+  it("says when the transaction in xmax has already ended", () => {
+    // Live case: after a lost-update run, a row kept xmax 766 from a finished lock.
+    expect(xmaxLabel("766", sessions)).toEqual({ text: "766 · finished", live: false });
+    expect(xmaxLabel("0", sessions)).toEqual({ text: "0", live: false });
+  });
+});

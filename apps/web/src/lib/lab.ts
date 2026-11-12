@@ -48,3 +48,13 @@ export function expectation(step: Step): string | null {
   if (step.then.code) parts.push(`then fails with SQLSTATE ${step.then.code}`);
   return parts.length ? `Expect: ${parts.join(", ")}.` : null;
 }
+
+/**
+ * xmax is a transaction id that deleted, updated or locked a row version. It only matters while
+ * that transaction is open; afterwards it stays on the row but its effect is already settled.
+ */
+export function xmaxLabel(xmax: string, sessions: LabState["sessions"]): { text: string; live: boolean } {
+  if (xmax === "0") return { text: "0", live: false };
+  const owner = (["A", "B"] as const).find((n) => sessions[n]?.xid === xmax);
+  return owner ? { text: `${xmax} · ${owner}'s open transaction`, live: true } : { text: `${xmax} · finished`, live: false };
+}

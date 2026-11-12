@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type Entry, type LabState, type Outcome, type Scenario, expectation, record, settle } from "@/lib/lab";
+import { type Entry, type LabState, type Outcome, type Scenario, expectation, record, settle, xmaxLabel } from "@/lib/lab";
 import { errorText, postJSON } from "@/lib/post";
 import { ResultTable } from "./ResultTable";
 
@@ -335,9 +335,10 @@ function Inside({ state }: { state: LabState }) {
       )}
       <h3>Row versions</h3>
       <p className="hint">
-        Every row version records xmin, the transaction that created it, and xmax, the one deleting
-        or locking it (0 means none). An UPDATE writes a new version; others keep reading the old
-        one until the change commits.
+        Every row version records xmin, the transaction that created it, and xmax, a transaction
+        that deleted, updated or locked it (0 means none). xmax matters only while that
+        transaction is open; afterwards it stays on the row as history. An UPDATE writes a new
+        version, and other transactions keep reading the old one until the change commits.
       </p>
       {state.versions.map((t) => (
         <div key={t.table} className="table-wrap">
@@ -357,7 +358,7 @@ function Inside({ state }: { state: LabState }) {
               {t.rows.map((r) => (
                 <tr key={r.ctid}>
                   <td className="num mono">{r.xmin}</td>
-                  <td className={`num mono${r.xmax !== "0" ? " tone-medium" : ""}`}>{r.xmax}</td>
+                  <XmaxCell xmax={r.xmax} sessions={state.sessions} />
                   <td className="mono">{r.ctid}</td>
                   {r.values.map((v, i) => (
                     <td key={i}>{String(v)}</td>
@@ -370,4 +371,9 @@ function Inside({ state }: { state: LabState }) {
       ))}
     </section>
   );
+}
+
+function XmaxCell({ xmax, sessions }: { xmax: string; sessions: LabState["sessions"] }) {
+  const label = xmaxLabel(xmax, sessions);
+  return <td className={`num mono${label.live ? " tone-medium" : ""}`}>{label.text}</td>;
 }
