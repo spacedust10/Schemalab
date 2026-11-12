@@ -34,11 +34,24 @@ export function uploadFile(file: File): Promise<Response> {
 
 /** One line on what a .sql upload left out, or null if it left nothing out. */
 export function skippedText(skipped: Record<string, number>): string | null {
-  const kinds = Object.entries(skipped).sort((a, b) => b[1] - a[1]);
+  const { [COPY_FROM_FILE]: files = 0, ...rest } = skipped;
+  const kinds = Object.entries(rest).sort((a, b) => b[1] - a[1]);
   const total = kinds.reduce((sum, [, n]) => sum + n, 0);
-  if (!total) return null;
   const what = total === 1 ? "statement that holds" : "statements that hold";
-  return `Skipped ${total} ${what} no tables or rows: ${kinds.map(([k, n]) => `${n} ${k}`).join(", ")}.`;
+  const parts = [
+    files &&
+      `The tables are empty: this file loads its rows with \\copy from ${files} CSV file${files === 1 ? "" : "s"} that ${files === 1 ? "is" : "are"} not part of it. You can still draw, normalize and ask about the schema.`,
+    total && `Skipped ${total} ${what} no tables or rows: ${kinds.map(([k, n]) => `${n} ${k}`).join(", ")}.`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" ") : null;
+}
+
+/** The API's name for psql \\copy lines, whose rows live in files outside the upload. */
+export const COPY_FROM_FILE = "\\copy from a CSV file not in this upload";
+
+export function addedText(names: string[]): string {
+  if (names.length <= 6) return `Added ${names.join(", ")}.`;
+  return `Added ${names.length} tables: ${names.slice(0, 5).join(", ")} and ${names.length - 5} more.`;
 }
 
 export type Link = { from: string; to: string };

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { errorText } from "@/lib/post";
-import { type Dataset, MAX_MB, checkFile, relationships, skippedText, uploadFile } from "@/lib/upload";
+import { type Dataset, MAX_MB, addedText, checkFile, relationships, skippedText, uploadFile } from "@/lib/upload";
 import { ConstraintCoach } from "./ConstraintCoach";
 import { ProfileTable } from "./ProfileTable";
 
@@ -46,7 +46,7 @@ export function DataView() {
         tables: Dataset[];
       };
       setTables(body.tables);
-      setNotice([`Added ${body.created.join(", ")}.`, skippedText(body.skipped)].filter(Boolean).join(" "));
+      setNotice([addedText(body.created), skippedText(body.skipped)].filter(Boolean).join(" "));
     } catch {
       setError("Lost the connection while uploading.");
     } finally {

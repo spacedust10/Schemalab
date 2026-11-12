@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_MB, type Dataset, checkFile, relationships, skippedText } from "./upload";
+import { MAX_MB, type Dataset, addedText, checkFile, relationships, skippedText } from "./upload";
 
 describe("checkFile", () => {
   it.each(["orders.csv", "Sales.XLSX", "q1 report.xlsx", "shop_dump.sql"])("accepts %s", (name) => {
@@ -33,6 +33,24 @@ describe("skippedText", () => {
 
   it("uses the singular for one statement", () => {
     expect(skippedText({ GRANT: 1 })).toBe("Skipped 1 statement that holds no tables or rows: 1 GRANT.");
+  });
+
+  it("says first that rows loaded from files outside the upload are missing", () => {
+    expect(skippedText({ COMMENT: 432, "\\copy from a CSV file not in this upload": 67 })).toBe(
+      "The tables are empty: this file loads its rows with \\copy from 67 CSV files that are not part of it. " +
+        "You can still draw, normalize and ask about the schema. Skipped 432 statements that hold no tables or rows: 432 COMMENT.",
+    );
+  });
+});
+
+describe("addedText", () => {
+  it("lists a few tables by name", () => {
+    expect(addedText(["a", "b"])).toBe("Added a, b.");
+  });
+
+  it("counts a long list instead of naming every table", () => {
+    const names = Array.from({ length: 68 }, (_, i) => `t${i}`);
+    expect(addedText(names)).toBe("Added 68 tables: t0, t1, t2, t3, t4 and 63 more.");
   });
 });
 
