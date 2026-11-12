@@ -26,7 +26,8 @@ from psycopg import sql
 from psycopg.pq import TransactionStatus
 
 from schemalab.agent.graph import json_value
-from schemalab.lab.guard import check_lab_sql
+from schemalab.lab.guard import LabSQLError, check_lab_sql
+from schemalab.plans import advise, summarize
 
 SESSIONS = ("A", "B")
 STATEMENT_TIMEOUT = "30s"  # includes time spent waiting for a lock
@@ -54,6 +55,8 @@ class Lab:
         self.admin: psycopg.Connection[Any] | None = None
         self.admin_lock = threading.Lock()
         self.conns: dict[str, psycopg.Connection[Any]] = {}
+        self.planner: psycopg.Connection[Any] | None = None  # a third session for EXPLAIN
+        self.plan_lock = threading.Lock()
         self.pools = {s: ThreadPoolExecutor(max_workers=1) for s in SESSIONS}
         self.pending: dict[str, Future[Outcome]] = {}
         self.lock = threading.Lock()
@@ -147,6 +150,9 @@ class Lab:
         self._terminate()  # also ends a statement still waiting for a lock
         for conn in self.conns.values():
             conn.close()
+        if self.planner is not None:
+            self.planner.close()
+            self.planner = None
         for future in self.pending.values():
             future.cancel()
         self.pending.clear()
@@ -240,6 +246,41 @@ class Lab:
             return "closed"
         return _TRANSACTION.get(conn.info.transaction_status, "unknown")
 
+    # Query plans
+
+    def explain(self, statement: str) -> dict[str, Any]:
+        """EXPLAIN ANALYZE a query and advise on indexes. EXPLAIN ANALYZE runs the query, so it
+        takes SELECT and WITH only and always runs inside a transaction that is rolled back:
+        even a data-modifying WITH changes nothing."""
+        text = check_lab_sql(statement)
+        if text.split(None, 1)[0].upper() not in ("SELECT", "WITH", "TABLE", "VALUES"):
+            raise LabSQLError("Explain a SELECT query; plans for changes would change your data.")
+        with self.plan_lock:
+            if self.planner is None or self.planner.closed:
+                self.planner = psycopg.connect(
+                    self.admin_dsn,
+                    user=self.role,
+                    password=self.password,
+                    autocommit=True,
+                    application_name="schemalab lab plans",
+                )
+            conn = self.planner
+            conn.execute("BEGIN")
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(b"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + text.encode())
+                    row = cur.fetchone()
+                    indexes = conn.execute(
+                        "SELECT tablename, indexdef FROM pg_indexes "
+                        "WHERE schemaname = current_schema()"
+                    ).fetchall()
+            finally:
+                conn.execute("ROLLBACK")
+        if row is None:
+            raise LabSQLError("PostgreSQL returned no plan.")
+        summary = summarize(row[0])
+        return {"summary": summary, "advice": advise(summary, _index_columns(indexes))}
+
     # Looking inside
 
     def state(self) -> dict[str, Any]:
@@ -319,3 +360,13 @@ def _message(e: psycopg.Error) -> str:
     return (diag.message_primary or str(e)).strip() + (
         f" {diag.message_detail}" if diag.message_detail else ""
     )
+
+
+def _index_columns(rows: list[tuple[str, str]]) -> dict[str, list[list[str]]]:
+    """Plain column lists of the existing indexes, from pg_indexes.indexdef."""
+    out: dict[str, list[list[str]]] = {}
+    for table, definition in rows:
+        inside = definition[definition.rfind("(") + 1 : definition.rfind(")")]
+        columns = [c.strip().strip('"').split()[0] for c in inside.split(",") if c.strip()]
+        out.setdefault(table, []).append(columns)
+    return out

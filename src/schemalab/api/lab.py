@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, StringConstraints
 from starlette.concurrency import run_in_threadpool
@@ -115,6 +116,23 @@ def run(user: UserDep, body: RunRequest) -> dict[str, Any]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
     except RuntimeError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+
+
+class ExplainRequest(BaseModel):
+    sql: Annotated[str, StringConstraints(max_length=5000)]
+
+
+@router.post("/explain")
+def explain(user: UserDep, body: ExplainRequest) -> dict[str, Any]:
+    """EXPLAIN ANALYZE in a third session, always rolled back, with index advice."""
+    lab = _lab(user)
+    try:
+        return lab.explain(body.sql)
+    except LabSQLError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    except psycopg.Error as e:
+        detail = (e.diag.message_primary or str(e)).strip()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail) from None
 
 
 @router.get("/result")

@@ -28,6 +28,8 @@ from schemalab.lab.guard import LabSQLError, check_lab_sql
         "SHOW transaction_isolation",
         "LOCK TABLE accounts IN SHARE MODE",
         "EXPLAIN SELECT 1",
+        "ANALYZE orders",
+        "VACUUM ANALYZE orders",
         "WITH x AS (SELECT 1) SELECT * FROM x",
         "-- note\nSELECT 'a; b'",
     ],

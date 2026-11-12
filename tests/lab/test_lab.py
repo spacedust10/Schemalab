@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from schemalab.lab.guard import LabSQLError
 from schemalab.lab.session import Lab
 
 DSN = os.environ.get("LAB_TEST_DSN", "")
@@ -142,3 +143,39 @@ def test_the_database_itself_refuses_to_lift_the_timeout(lab: Lab, statement: st
     out = lab._execute("A", statement)
     assert out["state"] == "error" and "permission denied" in str(out["error"])
     assert lab.run("A", "SHOW statement_timeout")["rows"] == [["30s"]]
+
+
+def big_orders(lab: Lab) -> None:
+    lab.run(
+        "A",
+        "CREATE TABLE orders AS SELECT i AS id, i % 500 AS customer_id, "
+        "CASE WHEN i % 40 = 0 THEN 'returned' ELSE 'shipped' END AS status "
+        "FROM generate_series(1, 40000) i",
+    )
+    lab.run("A", "ANALYZE orders")
+
+
+def test_explain_returns_the_plan_and_index_advice(lab: Lab) -> None:
+    big_orders(lab)
+    out = lab.explain("SELECT id FROM orders WHERE status = 'returned' AND customer_id = 40")
+    assert out["summary"]["nodes"][-1]["relation"] == "orders"
+    assert [a["columns"] for a in out["advice"]] == [["status", "customer_id"]]
+
+
+def test_explain_knows_the_existing_indexes(lab: Lab) -> None:
+    big_orders(lab)
+    lab.run("A", "CREATE INDEX orders_status_customer_id_idx ON orders (status, customer_id)")
+    out = lab.explain("SELECT id FROM orders WHERE status = 'returned' AND customer_id = 40")
+    assert out["advice"] == []
+    assert any("orders_status_customer_id_idx" in n["label"] for n in out["summary"]["nodes"])
+
+
+def test_explain_never_changes_data(lab: Lab) -> None:
+    big_orders(lab)
+    lab.explain("WITH gone AS (DELETE FROM orders RETURNING id) SELECT count(*) FROM gone")
+    assert lab.run("A", "SELECT count(*) FROM orders")["rows"] == [[40000]]
+
+
+def test_explain_takes_queries_only(lab: Lab) -> None:
+    with pytest.raises(LabSQLError, match="Explain a SELECT"):
+        lab.explain("UPDATE orders SET status = 'x'")

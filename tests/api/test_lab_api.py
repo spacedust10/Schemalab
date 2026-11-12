@@ -97,3 +97,23 @@ def test_each_users_lab_is_separate(lab_client: TestClient) -> None:
     run(lab_client, ada, "A", "CREATE TABLE mine (x int)")
     out = run(lab_client, bob, "A", "SELECT * FROM mine").json()
     assert out["state"] == "error" and "does not exist" in out["error"]
+
+
+@needs_postgres
+def test_explain_over_http(lab_client: TestClient) -> None:
+    headers = register(lab_client)
+    lab_client.post("/lab/start", headers=headers)
+    run(
+        lab_client,
+        headers,
+        "A",
+        "CREATE TABLE t AS SELECT i AS id, i % 300 AS g FROM generate_series(1, 30000) i",
+    )
+    run(lab_client, headers, "A", "ANALYZE t")
+    got = lab_client.post(
+        "/lab/explain", json={"sql": "SELECT id FROM t WHERE g = 7"}, headers=headers
+    ).json()
+    assert got["summary"]["tree"]["label"]
+    assert got["advice"][0]["sql"] == "CREATE INDEX t_g_idx ON t (g);"
+    refused = lab_client.post("/lab/explain", json={"sql": "DELETE FROM t"}, headers=headers)
+    assert refused.status_code == 400 and "Explain a SELECT" in refused.json()["detail"]

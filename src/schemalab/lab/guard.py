@@ -16,7 +16,7 @@ _ALLOWED = re.compile(
       | DROP \s+ (TABLE | INDEX | VIEW) | ALTER \s+ TABLE
       | BEGIN | START \s+ TRANSACTION | COMMIT | END | ROLLBACK | ABORT | SAVEPOINT | RELEASE
       | SET \s+ TRANSACTION | SET \s+ SESSION \s+ CHARACTERISTICS
-      | SHOW | LOCK | EXPLAIN
+      | SHOW | LOCK | EXPLAIN | ANALYZE | VACUUM
     )\b""",
     re.IGNORECASE | re.VERBOSE,
 )
@@ -90,7 +90,7 @@ def check_lab_sql(sql: str) -> str:
     if not _ALLOWED.match(code.strip()):
         raise LabSQLError(
             f"{first} is not allowed in the lab. Use queries, INSERT/UPDATE/DELETE, tables and "
-            "indexes, transaction control (BEGIN, COMMIT, ROLLBACK, SAVEPOINT), LOCK, SHOW and "
-            "EXPLAIN."
+            "indexes, transaction control (BEGIN, COMMIT, ROLLBACK, SAVEPOINT), LOCK, SHOW, "
+            "EXPLAIN, ANALYZE and VACUUM."
         )
     return statement
