@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.0 (2026-11-12)
+
+The database lab: design, normalize, query, transact and measure.
+
+- Benchmarks: generate TPC-H or TPC-DS data, load the same data into DuckDB and PostgreSQL, and run the standard queries on both. Each query is timed (median of three) and both engines' answers are checked against each other; at scale 0.01 all 121 queries agree. The page shows the speed ratio per query and the times. Scale 0.01 is open to everyone; larger scales need an operator account (SCHEMALAB_BENCH_OPERATORS).
 - Plans: run EXPLAIN ANALYZE on your lab tables and see where the time goes (own time per node, actual vs estimated rows, misestimates flagged). An index advisor suggests CREATE INDEX statements with the evidence, and one click creates the index and compares the timings. Step-through B+ tree and extendible hashing animations.
 - Design: one input takes design text, CREATE TABLE statements or a .sql file, including whole pg_dump and mysqldump files.
 - Schedules and recovery: check a schedule's precedence graph, conflict and view serializability, recoverability classes, and whether basic, strict or rigorous 2PL could produce it (with locks written in); replay a write-ahead log through ARIES analysis, redo and undo with CLRs.
