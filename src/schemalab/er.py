@@ -20,7 +20,9 @@ from typing import Literal
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import SqlglotError
+from sqlglot.errors import ErrorLevel, SqlglotError
+
+from schemalab.sqldump import split_copy_blocks
 
 DIALECTS = {
     "postgres": "PostgreSQL",
@@ -396,9 +398,12 @@ class _Parsed:
 
 
 def from_ddl(text: str) -> Model:
-    dialect = "mysql" if "`" in text else "tsql" if "[" in text else "postgres"
+    # Whole dumps work too: COPY data blocks are cut out, statements sqlglot cannot model
+    # (functions, SET, GRANT) are ignored, and keys added later by ALTER TABLE are applied.
+    sql, _ = split_copy_blocks(text)
+    dialect = "mysql" if "`" in sql else "tsql" if "[" in sql else "postgres"
     try:
-        statements = sqlglot.parse(text, read=dialect)
+        statements = sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.IGNORE)
     except SqlglotError as e:
         raise ERError(f"Could not read the SQL: {str(e).splitlines()[0]}") from None
     parsed = [
@@ -408,6 +413,14 @@ def from_ddl(text: str) -> Model:
         and s.args.get("kind") == "TABLE"
         and isinstance(s.this, exp.Schema)
     ]
+    by_name = {p.name: p for p in parsed}
+    for s in statements:
+        if isinstance(s, exp.Alter) and (altered := by_name.get(s.this.name)):
+            for pk in s.find_all(exp.PrimaryKey):
+                altered.primary.extend(i.name for i in pk.expressions)
+            for fk in s.find_all(exp.ForeignKey):
+                cols = [i.name for i in fk.expressions]
+                altered.foreign.append((cols, _ref_table(fk.args["reference"])))
     if not parsed:
         raise ERError("The SQL has no CREATE TABLE statements.")
     names = {p.name for p in parsed}

@@ -68,7 +68,7 @@ def ident(text: str, taken: set[str] | None = None) -> str:
 
 
 def read_dump(text: str, work: Path) -> Dump:
-    sql, copies = _split_copy_blocks(text)
+    sql, copies = split_copy_blocks(text)
     dialect = "mysql" if "`" in sql else "postgres"
     try:
         statements = sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.IGNORE)
@@ -90,7 +90,7 @@ def read_dump(text: str, work: Path) -> Dump:
     return Dump(list(reader.tables.values()), reader.keys, reader.skipped)
 
 
-def _split_copy_blocks(text: str) -> tuple[str, list[tuple[re.Match[str], list[str]]]]:
+def split_copy_blocks(text: str) -> tuple[str, list[tuple[re.Match[str], list[str]]]]:
     """Take pg_dump `COPY ... FROM stdin` data out of the SQL, which sqlglot cannot parse."""
     sql: list[str] = []
     copies: list[tuple[re.Match[str], list[str]]] = []

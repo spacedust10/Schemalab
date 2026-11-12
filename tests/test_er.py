@@ -204,3 +204,55 @@ def test_a_table_without_a_key_uses_its_first_own_column() -> None:
     """
     players = from_ddl(ddl).entities[1]
     assert [(a.name, a.key) for a in players.attributes] == [("name", True), ("age", False)]
+
+
+PG_DUMP = r"""
+SET statement_timeout = 0;
+CREATE FUNCTION public.touch() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN NEW.updated = now(); RETURN NEW; END; $$;
+CREATE TABLE public.customers (id integer NOT NULL, name text);
+CREATE TABLE public.orders (id integer NOT NULL, customer_id integer NOT NULL, total numeric(8,2));
+COPY public.customers (id, name) FROM stdin;
+1	Ada
+\.
+ALTER TABLE ONLY public.customers ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_customer_fk FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+"""
+
+
+def test_from_ddl_reads_a_pg_dump_with_keys_added_later() -> None:
+    model = from_ddl(PG_DUMP)
+    customers, orders = model.entities
+    assert [(a.name, a.key) for a in customers.attributes] == [("id", True), ("name", False)]
+    assert [a.name for a in orders.attributes] == ["id", "total"]  # the FK column is a link
+    [rel] = model.relationships
+    assert (rel.kind, rel.left.entity, rel.right.entity, rel.right.total) == (
+        "1:N",
+        "Customers",
+        "Orders",
+        True,
+    )
+
+
+def test_from_ddl_reads_a_mysqldump() -> None:
+    dump = """
+    DROP TABLE IF EXISTS `items`;
+    CREATE TABLE `items` (
+      `id` int NOT NULL AUTO_INCREMENT,
+      `shelf_id` int DEFAULT NULL,
+      `label` varchar(40) DEFAULT NULL,
+      PRIMARY KEY (`id`),
+      KEY `shelf_idx` (`shelf_id`),
+      CONSTRAINT `items_shelf` FOREIGN KEY (`shelf_id`) REFERENCES `shelves` (`id`)
+    ) ENGINE=InnoDB;
+    CREATE TABLE `shelves` (`id` int NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB;
+    LOCK TABLES `items` WRITE;
+    INSERT INTO `items` VALUES (1,NULL,'it\\'s');
+    UNLOCK TABLES;
+    """
+    model = from_ddl(dump)
+    assert [e.name for e in model.entities] == ["Items", "Shelves"]
+    [rel] = model.relationships
+    assert (rel.kind, rel.left.entity, rel.right.entity) == ("1:N", "Shelves", "Items")
