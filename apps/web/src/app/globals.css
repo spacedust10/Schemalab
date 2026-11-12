@@ -587,6 +587,49 @@ pre.sql {
   color: var(--ink-2);
 }
 
+/* Schedules and recovery */
+.graph-box {
+  max-width: 420px;
+}
+.graph-edge {
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+}
+.graph-head {
+  fill: var(--ink-2);
+}
+.graph-cycle {
+  stroke: var(--object);
+  fill: none;
+  stroke-width: 2.2;
+}
+path.graph-head.graph-cycle {
+  fill: var(--object);
+  stroke: none;
+}
+.contents {
+  display: contents;
+}
+.lock-row {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+.lock-row h3 {
+  font-size: var(--step-0);
+}
+.lock-trace {
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.lock-op {
+  color: var(--accent);
+}
+.tone-high {
+  color: var(--ok);
+}
+
 /* Transaction lab */
 .lab-controls .field {
   min-width: min(100%, 22rem);
