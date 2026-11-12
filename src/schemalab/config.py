@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///data/app.db"
     # Transaction lab: a superuser DSN for a separate, disposable Postgres. Empty turns it off.
     lab_admin_dsn: str = ""
+    # Generated TPC-H/TPC-DS DuckDB files and saved benchmark results.
+    bench_dir: str = "data/bench"
 
 
 @lru_cache
