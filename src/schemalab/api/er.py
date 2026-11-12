@@ -36,6 +36,7 @@ def _model_json(model: er.Model) -> dict[str, Any]:
     return {
         "entities": [asdict(e) for e in model.entities],
         "relationships": [{**asdict(r), "kind": r.kind} for r in model.relationships],
+        "specializations": [asdict(sp) for sp in model.specializations],
     }
 
 

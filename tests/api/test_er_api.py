@@ -1,5 +1,6 @@
 """ER designer endpoints."""
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -112,3 +113,19 @@ def test_a_whole_dump_file_fits(client: TestClient) -> None:
     dump = f"CREATE TABLE a (id INT PRIMARY KEY);\n{rows}"
     assert len(dump) > 100_000
     assert post(client, "/er/ddl", {"design": dump}).status_code == 200
+
+
+def test_the_model_carries_weak_entities_and_specializations(client: TestClient) -> None:
+    sql = (Path(__file__).parent.parent / "fixtures" / "er_users.sql").read_text()
+    model = post(client, "/er/ddl", {"design": sql}).json()["model"]
+    assert {e["name"]: e["weak"] for e in model["entities"]}["Users"] is True
+    assert [r["identifying"] for r in model["relationships"]] == [True, True, False]
+    assert model["specializations"] == [
+        {
+            "parent": "Users",
+            "children": ["VerifiedUsers", "UnverifiedUsers"],
+            "disjoint": True,
+            "total": True,
+            "discriminator": "user_type",
+        }
+    ]

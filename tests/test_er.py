@@ -53,7 +53,7 @@ def test_parse_entities_keys_and_relationships() -> None:
         ("entity A { x int key }\nrelationship R: A 1 -- N B", "line 2: B is not an entity"),
         ("entity A { x int key }\nrelationship R: A 2 -- N A", "line 2: write a relationship as"),
         ("entity Order { x int key }", "line 1: Order is a reserved word in SQL"),
-        ("table A { x int key }", "line 1: start a line with entity or relationship"),
+        ("table A { x int key }", "line 1: start a line with entity, relationship or isa"),
         ("", "Describe at least one entity"),
     ],
 )
