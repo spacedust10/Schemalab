@@ -159,7 +159,7 @@ describe("enhanced ER layout", () => {
     expect(Math.max(...rows(many).map((r) => r.length))).toBe(6);
     const l = crowLayout(many);
     expect(l.width).toBeLessThan(1700); // six boxes and their gaps
-    expect(Math.max(...Object.values(chenLayout(many).entities).map((p) => p.x))).toBeLessThan(2400);
+    expect(Math.max(...Object.values(chenLayout(many).entities).map((p) => p.x))).toBeLessThan(2600); // six 460px cells
   });
 
   it("puts each Chen ISA circle between the supertype and its subtypes", () => {
