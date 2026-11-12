@@ -110,3 +110,14 @@ def test_lab_database_sits_on_its_own_internal_network() -> None:
     assert "lab" not in services["postgres"]["networks"]
     assert "lab" not in services["web"]["networks"]
     assert set(services["api"]["networks"]) == {"app", "lab"}
+
+
+def test_api_image_ships_the_tpc_extensions_and_a_bench_volume() -> None:
+    # The benchmark must not download DuckDB extensions at run time, and it needs disk.
+    dockerfile = (ROOT / "Dockerfile.api").read_text()
+    assert "INSTALL tpch" in dockerfile and "INSTALL tpcds" in dockerfile
+    assert dockerfile.index("USER app") < dockerfile.index("INSTALL tpch")  # in the app's home
+    assert "chown app /app/data/uploads /app/data/bench" in dockerfile
+    compose = load("docker-compose.yml")
+    assert "bench:/app/data/bench" in compose["services"]["api"]["volumes"]
+    assert "bench" in compose["volumes"]

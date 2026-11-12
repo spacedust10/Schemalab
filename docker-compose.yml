@@ -41,7 +41,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       SCHEMALAB_LAB_ADMIN_DSN: postgresql://lab:${LAB_DB_PASSWORD:-lab}@labdb:5432/lab
     extra_hosts: ["host.docker.internal:host-gateway"]
-    volumes: ["./data/samples:/app/data/samples:ro", "uploads:/app/data/uploads"]
+    volumes: ["./data/samples:/app/data/samples:ro", "uploads:/app/data/uploads", "bench:/app/data/bench"]
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
     networks: [app, lab]
     depends_on:
@@ -68,3 +68,4 @@ networks:
 volumes:
   pgdata:
   uploads:
+  bench:

@@ -109,6 +109,7 @@ def prepare(root: Path, dsn: str, bench: str, sf: float, progress: Progress) -> 
             tmp = path.with_suffix(".building")
             tmp.unlink(missing_ok=True)
             with duckdb.connect(str(tmp)) as con:
+                con.execute(f"INSTALL {bench}")  # a no-op once installed, as in the image
                 con.execute(f"LOAD {bench}")
                 con.execute(spec.generate.format(sf=float(sf)))  # sf is one of the fixed scales
             tmp.replace(path)
@@ -194,6 +195,7 @@ def run(
 ) -> dict[str, Any]:
     spec = _check(bench, sf)
     with duckdb.connect() as catalog:
+        catalog.execute(f"INSTALL {bench}")
         catalog.execute(f"LOAD {bench}")
         queries = [
             (int(n), q)

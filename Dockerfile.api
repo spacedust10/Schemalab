@@ -12,8 +12,10 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 1000 app \
-    && mkdir -p /app/data/uploads && chown app /app/data/uploads
+    && mkdir -p /app/data/uploads /app/data/bench && chown app /app/data/uploads /app/data/bench
 USER app
 ENV PATH=/opt/venv/bin:$PATH
+# The benchmark's data generators, installed now so nothing downloads at run time.
+RUN python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL tpch'); c.execute('INSTALL tpcds')"
 EXPOSE 8000
 CMD ["uvicorn", "schemalab.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
