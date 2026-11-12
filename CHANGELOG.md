@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Design: weak entities, identifying relationships and specialization (ISA) are read from SQL, written in the design text (weak entity, identifying relationship, isa Super: A, B disjoint total on kind) and mapped back to tables. Chen diagrams use Elmasri and Navathe's notation; crow's-foot diagrams use IDEF1X conventions. A foreign key covering a table's key is now 1:1 or a subtype, not 1:N, and relationship names no longer come from the first key column.
+- Diagrams are laid out in layers (owners and supertypes above), with relationship names kept clear of boxes and of each other, and long rows wrapped.
+- .sql files: tables nested in CREATE SCHEMA, CREATE DOMAIN types, schema-qualified names, columns added by ALTER TABLE and psql meta-commands are handled, so the AdventureWorks for Postgres script loads. When a file's rows live in CSV files it loads with \copy, the upload says the tables are empty and why.
+- Up to 100 uploaded tables and design entities (was 50 and 40).
+
 ## 0.2.0 (2026-11-12)
 
 The database lab: design, normalize, query, transact and measure.
