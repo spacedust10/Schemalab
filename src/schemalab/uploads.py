@@ -28,7 +28,7 @@ from schemalab.sqldump import NULL, DumpError, ident, read_dump
 MAX_BYTES = 50 * 1024 * 1024
 # A zipped .xlsx can expand far past MAX_BYTES; this caps the CSV it unpacks to.
 MAX_UNPACKED_BYTES = 4 * MAX_BYTES
-MAX_TABLES = 50  # a whole database dump can hold dozens
+MAX_TABLES = 100  # a whole sample database, like AdventureWorks (68), fits
 MAX_COLUMNS = 500
 SUFFIXES = (".csv", ".xlsx", ".sql")
 # Key notes are built from [a-z0-9_] identifiers, so they are safe inside a SQL string.
@@ -97,8 +97,14 @@ def import_file(db: Path, src: Path, filename: str) -> Imported:
 
 
 def _check_room(taken: set[str], adding: int) -> None:
+    has = f"This file has {adding} table{'' if adding == 1 else 's'}"
+    if adding > MAX_TABLES:
+        raise UploadError(f"{has}; you can keep at most {MAX_TABLES}.")
     if len(taken) + adding > MAX_TABLES:
-        raise UploadError(f"You can keep at most {MAX_TABLES} tables. Delete some first.")
+        raise UploadError(
+            f"{has} and you have {len(taken)}; you can keep at most {MAX_TABLES}. "
+            "Delete some first."
+        )
 
 
 def _load_dump(con: duckdb.DuckDBPyConnection, src: Path, work: Path, taken: set[str]) -> Imported:

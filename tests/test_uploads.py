@@ -138,7 +138,7 @@ def test_table_limit_is_enforced(tmp_path: Path, db: Path) -> None:
     src = csv_file(tmp_path, "a\n1\n")
     for _ in range(MAX_TABLES):
         import_file(db, src, "t.csv")
-    with pytest.raises(UploadError, match=f"{MAX_TABLES} tables"):
+    with pytest.raises(UploadError, match=f"has 1 table and you have {MAX_TABLES}; you can"):
         import_file(db, src, "t.csv")
     assert len(list_tables(db)) == MAX_TABLES
 
@@ -251,9 +251,13 @@ def test_dump_without_tables_is_refused(tmp_path: Path, db: Path) -> None:
 
 def test_dump_with_too_many_tables_is_refused(tmp_path: Path, db: Path) -> None:
     text = "".join(f"CREATE TABLE t{i} (a int);" for i in range(MAX_TABLES + 1))
-    with pytest.raises(UploadError, match=f"{MAX_TABLES} tables"):
+    with pytest.raises(UploadError, match=f"has {MAX_TABLES + 1} tables; you can keep at most"):
         import_file(db, sql_file(tmp_path, text), "big.sql")
     assert list_tables(db) == []
+
+
+def test_room_for_a_whole_sample_database() -> None:
+    assert MAX_TABLES >= 100  # AdventureWorks for Postgres has 68 tables
 
 
 def test_dump_that_is_not_utf8_still_loads(tmp_path: Path, db: Path) -> None:
