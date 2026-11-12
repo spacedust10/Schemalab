@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Box, type ERModel, chenLayout, crowEnds, crowLabels, crowLayout, entityOrder, inheritsFrom, layers } from "./er";
+import { type Box, type ERModel, chenLayout, crowEnds, crowLabels, crowLayout, entityOrder, inheritsFrom, layers, rows } from "./er";
 
 const attr = (name: string, key = false) => ({ name, type: "INT", key });
 const UNI: ERModel = {
@@ -153,6 +153,14 @@ describe("enhanced ER layout", () => {
       }
     });
   }
+
+  it("wraps a long row so a big schema stays readable", () => {
+    const many: ERModel = { entities: Array.from({ length: 30 }, (_, i) => ({ name: `T${i}`, attributes: [attr("id", true)] })), relationships: [] };
+    expect(Math.max(...rows(many).map((r) => r.length))).toBe(6);
+    const l = crowLayout(many);
+    expect(l.width).toBeLessThan(1700); // six boxes and their gaps
+    expect(Math.max(...Object.values(chenLayout(many).entities).map((p) => p.x))).toBeLessThan(2400);
+  });
 
   it("puts each Chen ISA circle between the supertype and its subtypes", () => {
     const l = chenLayout(USERS);

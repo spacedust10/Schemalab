@@ -89,8 +89,11 @@ export function rows(m: ERModel): string[][] {
     };
     out[i] = [...(out[i] ?? [])].sort((a, b) => pos(a) - pos(b) || base.indexOf(a) - base.indexOf(b));
   }
-  return out.filter(Boolean);
+  // A long row wraps onto rows of its own, so a big schema grows down, not off to the side.
+  return out.filter(Boolean).flatMap((r) => Array.from({ length: Math.ceil(r.length / MAX_PER_ROW) }, (_, k) => r.slice(k * MAX_PER_ROW, (k + 1) * MAX_PER_ROW)));
 }
+
+const MAX_PER_ROW = 6;
 
 export type Mark = "zero" | "one" | "many";
 export type CrowEnd = { max: Mark; min: Mark };
