@@ -32,7 +32,7 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ErrorLevel, SqlglotError
 
-from schemalab.sqldump import split_copy_blocks
+from schemalab.sqldump import prepare
 
 DIALECTS = {
     "postgres": "PostgreSQL",
@@ -579,7 +579,9 @@ def camel(name: str) -> str:
 
 @dataclass
 class _Parsed:
-    name: str
+    name: str  # lowercased schema.table, or table
+    label: str  # the table name as written
+    schema: str
     columns: list[tuple[str, str]]
     not_null: set[str]
     primary: list[str]
@@ -591,8 +593,10 @@ class _Parsed:
 def from_ddl(text: str) -> Model:
     # Whole dumps work too: COPY data blocks are cut out, statements sqlglot cannot model
     # (functions, SET, GRANT) are ignored, and keys added later by ALTER TABLE are applied.
-    sql, _ = split_copy_blocks(text)
-    dialect = "mysql" if "`" in sql else "tsql" if "[" in sql else "postgres"
+    sql, _, _ = prepare(text)
+    # Bracketed names like [dbo].[t] mean SQL Server; a bracket alone (ARRAY[1]) does not.
+    tsql = re.search(r"\[[A-Za-z_][\w ]*\]\s*[.(]", sql)
+    dialect = "mysql" if "`" in sql else "tsql" if tsql else "postgres"
     try:
         statements = sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.IGNORE)
     except SqlglotError as e:
@@ -605,8 +609,16 @@ def from_ddl(text: str) -> Model:
         and isinstance(s.this, exp.Schema)
     ]
     by_name = {p.name: p for p in parsed}
+
+    def resolve(key: str) -> str:
+        """schema.table as written, or a bare name that only one table has."""
+        if key in by_name or "." in key:
+            return key
+        matches = [k for k in by_name if k.rsplit(".", 1)[-1] == key]
+        return matches[0] if len(matches) == 1 else key
+
     for s in statements:
-        if isinstance(s, exp.Alter) and (altered := by_name.get(s.this.name)):
+        if isinstance(s, exp.Alter) and (altered := by_name.get(resolve(_key(s.this)))):
             for pk in s.find_all(exp.PrimaryKey):
                 altered.primary.extend(i.name for i in pk.expressions)
             for fk in s.find_all(exp.ForeignKey):
@@ -614,8 +626,29 @@ def from_ddl(text: str) -> Model:
                 altered.foreign.append((cols, *_ref(fk.args["reference"])))
     if not parsed:
         raise ERError("The SQL has no CREATE TABLE statements.")
+    for p in parsed:
+        p.foreign = [(cols, resolve(t), ref) for cols, t, ref in p.foreign]
+    # Column names match case-insensitively, as unquoted names do in SQL.
+    canon = {p.name: {c.lower(): c for c, _ in p.columns} for p in parsed}
+    for p in parsed:
+        fix = canon[p.name]
+        p.primary = [fix.get(c.lower(), c) for c in p.primary]
+        p.unique = [{fix.get(c.lower(), c) for c in u} for u in p.unique]
+        p.foreign = [
+            (
+                [fix.get(c.lower(), c) for c in cols],
+                t,
+                [canon.get(t, {}).get(r.lower(), r) for r in ref],
+            )
+            for cols, t, ref in p.foreign
+        ]
     names = {p.name for p in parsed}
     by_table = {p.name: p for p in parsed}
+    # Entity names: the table's own name, with its schema when an earlier table has it.
+    display: dict[str, str] = {}
+    for p in parsed:
+        plain = camel(p.label)
+        display[p.name] = plain if plain not in display.values() else camel(p.schema) + plain
 
     def is_junction(p: _Parsed) -> bool:
         fk_cols = {c for cols, _, _ in p.foreign for c in cols}
@@ -664,14 +697,14 @@ def from_ddl(text: str) -> Model:
         attrs = [
             Attribute(c, _type_from_sql(t), c in keys) for c, t in p.columns if c not in hidden
         ]
-        entities.append(Entity(camel(p.name), attrs, p.name in owned))
+        entities.append(Entity(display[p.name], attrs, p.name in owned))
     for p in parsed:
         if is_junction(p):
             (_, a, _), (_, b, _) = p.foreign
             fk_cols = {c for cols, _, _ in p.foreign for c in cols}
             attrs = [Attribute(c, _type_from_sql(t)) for c, t in p.columns if c not in fk_cols]
             relationships.append(
-                Relationship(camel(p.name), End(camel(a), "N"), End(camel(b), "N"), attrs)
+                Relationship(display[p.name], End(display[a], "N"), End(display[b], "N"), attrs)
             )
             continue
         for cols, target, ref in p.foreign:
@@ -687,31 +720,31 @@ def from_ddl(text: str) -> Model:
             same = cols == target_cols or role in target_cols or not role
             relationships.append(
                 Relationship(
-                    camel(target) + camel(p.name) if same else camel(p.name) + camel(role),
-                    End(camel(target), "1"),
-                    End(camel(p.name), "1" if one_to_one else "N", total),
+                    display[target] + display[p.name] if same else display[p.name] + camel(role),
+                    End(display[target], "1"),
+                    End(display[p.name], "1" if one_to_one else "N", total),
                     identifying=cols in owned.get(p.name, []),
                 )
             )
 
     specializations: list[Specialization] = []
     for child, (parent, extra) in isa.items():
-        sp = next((x for x in specializations if x.parent == camel(parent)), None)
+        sp = next((x for x in specializations if x.parent == display[parent]), None)
         if sp is None:
             disc = extra[0] if len(extra) == 1 else None
             values = by_table[parent].checks.get(disc or "", set())
             children = [c for c, (p2, _) in isa.items() if p2 == parent]
             sp = Specialization(
-                camel(parent),
+                display[parent],
                 [],
                 disjoint=bool(extra),
                 total=bool(disc)
                 and disc in by_table[parent].not_null
                 and len(values) == len(children),
-                discriminator=None if disc == f"{parent}_type" else disc,
+                discriminator=None if disc == f"{by_table[parent].label}_type" else disc,
             )
             specializations.append(sp)
-        sp.children.append(camel(child))
+        sp.children.append(display[child])
     return Model(entities, relationships, specializations)
 
 
@@ -725,7 +758,9 @@ def _common_role(cols: list[str], target_cols: list[str]) -> str:
 
 def _read_table(create: exp.Create) -> _Parsed:
     schema = create.this
-    p = _Parsed(schema.this.name, [], set(), [], [], [])
+    table = schema.this
+    db = table.args.get("db")
+    p = _Parsed(_key(table), table.name, db.name if db else "", [], set(), [], [], [])
     for item in schema.expressions:
         if isinstance(item, exp.ColumnDef):
             kind = item.args.get("kind")
@@ -757,12 +792,18 @@ def _read_table(create: exp.Create) -> _Parsed:
     return p
 
 
+def _key(table: exp.Expr) -> str:
+    """schema.table or table, lowercased, as unquoted names are."""
+    db = table.args.get("db")
+    return f"{db.name}.{table.name}".lower() if db else str(table.name).lower()
+
+
 def _ref(ref: exp.Reference) -> tuple[str, list[str]]:
     """The referenced table and columns (empty: its primary key)."""
     target = ref.this
     if isinstance(target, exp.Schema):
-        return str(target.this.name), [i.name for i in target.expressions]
-    return str(target.name), []
+        return _key(target.this), [i.name for i in target.expressions]
+    return _key(target), []
 
 
 def _role(column: str, target_keys: list[str]) -> str:

@@ -3,7 +3,10 @@
 sqlglot parses the file. CREATE TABLE gives names and column types, rebuilt from the parse tree
 with constraints, defaults and sequences dropped. INSERT ... VALUES rows (constants only) and
 pg_dump COPY ... FROM stdin blocks are written to one CSV file per table, which `uploads`
-loads. Primary and foreign keys are recorded so the overview and the model can see how tables
+loads. Before parsing, `prepare` splits PostgreSQL's CREATE SCHEMA s CREATE TABLE t ... form
+into one statement per table (s.t), replaces CREATE DOMAIN types with their base types, and
+drops psql meta-commands such as \\copy, counting them.
+Primary and foreign keys are recorded so the overview and the model can see how tables
 join. Every other statement is skipped and counted, so the user sees what was left out.
 """
 
@@ -68,7 +71,7 @@ def ident(text: str, taken: set[str] | None = None) -> str:
 
 
 def read_dump(text: str, work: Path) -> Dump:
-    sql, copies = split_copy_blocks(text)
+    sql, copies, meta = prepare(text)
     dialect = "mysql" if "`" in sql else "postgres"
     try:
         statements = sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.IGNORE)
@@ -77,6 +80,7 @@ def read_dump(text: str, work: Path) -> Dump:
         raise DumpError(f"Could not read the SQL: {first}") from None
 
     reader = _Reader(work)
+    reader.skipped.update(meta)
     try:
         for statement in statements:
             if statement is not None:
@@ -88,6 +92,119 @@ def read_dump(text: str, work: Path) -> Dump:
     if not reader.tables:
         raise DumpError("The file has no CREATE TABLE statements to load.")
     return Dump(list(reader.tables.values()), reader.keys, reader.skipped)
+
+
+_LEADING_COMMENTS = re.compile(r"\A(?:\s+|--[^\n]*(?:\n|\Z)|/\*.*?\*/)*", re.S)
+_META = re.compile(r"^\s*\\(\w+)")
+_SCHEMA_HEAD = re.compile(
+    r"CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?(\"[^\"]+\"|\w+)(?:\s+AUTHORIZATION\s+\S+)?",
+    re.IGNORECASE,
+)
+_ELEMENT_NAME = re.compile(
+    r"(CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNLOGGED\s+)?(?:TABLE|VIEW|SEQUENCE)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?)(\"[^\"]+\"|\w+)(?!\s*\.)",
+    re.IGNORECASE,
+)
+_DOMAIN = re.compile(
+    r"CREATE\s+DOMAIN\s+(?:\w+\.)?(\"[^\"]+\"|\w+)\s+(?:AS\s+)?"
+    r"(\w+(?:\s+(?:precision|varying))?(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?)",
+    re.IGNORECASE,
+)
+
+
+def prepare(text: str) -> tuple[str, list[tuple[re.Match[str], list[str]]], Counter[str]]:
+    """The SQL as sqlglot can read it, the COPY data blocks, and what was dropped."""
+    sql, copies = split_copy_blocks(text)
+    dropped: Counter[str] = Counter()
+    kept = []
+    for line in sql.splitlines():
+        meta = _META.match(line)
+        if not meta:
+            kept.append(line)
+        elif meta[1].lower() == "copy":
+            dropped["\\copy from a CSV file not in this upload"] += 1
+        else:
+            dropped[f"psql \\{meta[1]}"] += 1
+    statements = []
+    for statement in _statements("\n".join(kept)):
+        statement = _LEADING_COMMENTS.sub("", statement)
+        head = _SCHEMA_HEAD.match(statement)
+        if head and _elements(statement[head.end() :]):
+            statements.append(head[0])
+            for element in _elements(statement[head.end() :]):
+                statements.append(_ELEMENT_NAME.sub(rf"\1{head[1]}.\2", element, count=1))
+        else:
+            statements.append(statement)
+    domains = {}
+    for statement in statements:
+        if found := _DOMAIN.match(statement):
+            domains[found[1]] = found[2]
+    out = []
+    for statement in statements:
+        if not _DOMAIN.match(statement):
+            for name, base in domains.items():
+                # Only where a type goes: after a column name that starts a line or follows ( or ,
+                pattern = rf'((?:^|[(,])\s*"?\w+"?\s+){re.escape(name)}(?=[\s,)]|$)'
+                flags = re.MULTILINE | (0 if name.startswith('"') else re.IGNORECASE)
+                statement = re.sub(pattern, rf"\g<1>{base}", statement, flags=flags)
+        out.append(statement)
+    return ";\n".join(out) + (";" if out else ""), copies, dropped
+
+
+def _scan(sql: str) -> Iterator[tuple[int, str, int]]:
+    """(index, character, parenthesis depth) for characters outside quotes, dollar quotes and
+    comments."""
+    i, depth, n = 0, 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if sql.startswith("--", i):
+            i = sql.find("\n", i)
+            i = n if i < 0 else i
+            continue
+        if sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        if ch in "'\"":
+            end = i + 1
+            while end < n:
+                if sql[end] == ch and sql.startswith(ch * 2, end):
+                    end += 2
+                elif sql[end] == ch:
+                    break
+                else:
+                    end += 1
+            i = end + 1
+            continue
+        if ch == "$" and (tag := re.match(r"\$\w*\$", sql[i:])):
+            end = sql.find(tag[0], i + len(tag[0]))
+            i = n if end < 0 else end + len(tag[0])
+            continue
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        yield i, ch, depth
+        i += 1
+
+
+def _statements(sql: str) -> list[str]:
+    out, start = [], 0
+    for i, ch, _ in _scan(sql):
+        if ch == ";":
+            out.append(sql[start:i])
+            start = i + 1
+    out.append(sql[start:])
+    return [s.strip() for s in out if s.strip()]
+
+
+def _elements(body: str) -> list[str]:
+    """The CREATE and GRANT statements nested in a CREATE SCHEMA, split where each begins."""
+    starts = [
+        i
+        for i, _, depth in _scan(body)
+        if depth == 0
+        and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] == "_"))
+        and re.match(r"(CREATE|GRANT)\s", body[i:], re.IGNORECASE)
+    ]
+    return [body[a:b].strip() for a, b in zip(starts, [*starts[1:], len(body)], strict=True)]
 
 
 def split_copy_blocks(text: str) -> tuple[str, list[tuple[re.Match[str], list[str]]]]:
@@ -112,7 +229,7 @@ def split_copy_blocks(text: str) -> tuple[str, list[tuple[re.Match[str], list[st
 class _Reader:
     def __init__(self, work: Path) -> None:
         self.work = work
-        self.tables: dict[str, DumpTable] = {}  # by lowercased name as written in the dump
+        self.tables: dict[str, DumpTable] = {}  # by lowercased schema.name or name
         self.keys: dict[tuple[str, str], str] = {}
         self.skipped: Counter[str] = Counter()
         self._files: dict[str, tuple[IO[str], Any]] = {}
@@ -133,10 +250,24 @@ class _Reader:
         else:
             self.skipped[_kind(node)] += 1
 
+    def find(self, node: exp.Expr) -> DumpTable | None:
+        """The table a name refers to: schema.table exactly, or a bare name if only one table
+        has it (as the search path would find it)."""
+        table = node.this if isinstance(node, exp.Schema) else node
+        name, db = table.name.lower(), table.args.get("db")
+        if db:
+            return self.tables.get(f"{db.name.lower()}.{name}")
+        if name in self.tables:
+            return self.tables[name]
+        matches = [t for k, t in self.tables.items() if k.rsplit(".", 1)[-1] == name]
+        return matches[0] if len(matches) == 1 else None
+
     def create(self, schema: exp.Schema) -> None:
         source = schema.this.name
+        db = schema.this.args.get("db")
         table_names = {t.name for t in self.tables.values()}
-        name = ident(source, table_names)
+        clash = ident(source) in table_names and db
+        name = ident(f"{db.name}_{source}" if clash else source, table_names)
         columns: list[tuple[str, str]] = []
         source_columns: dict[str, int] = {}
         for item in schema.expressions:
@@ -145,7 +276,7 @@ class _Reader:
                 source_columns[item.name.lower()] = len(columns)
                 columns.append((col, _type(item.args.get("kind"))))
         table = DumpTable(name, columns, self.work / f"{name}.csv", source_columns=source_columns)
-        self.tables[source.lower()] = table
+        self.tables[f"{db.name.lower()}.{source.lower()}" if db else source.lower()] = table
         f = table.csv.open("w", newline="")
         writer = csv.writer(f)
         writer.writerow([c for c, _ in columns])
@@ -176,13 +307,13 @@ class _Reader:
         return found
 
     def alter_keys(self, node: exp.Alter) -> bool:
-        table = self.tables.get(node.this.name.lower())
+        table = self.find(node.this)
         return table is not None and self.add_keys(table, node)
 
     def reference(self, ref: exp.Reference) -> str:
         target = ref.this
         table_node = target.this if isinstance(target, exp.Schema) else target
-        other = self.tables.get(table_node.name.lower())
+        other = self.find(table_node)
         table = other.name if other else ident(table_node.name)
         cols = target.expressions if isinstance(target, exp.Schema) else []
         if not cols:
@@ -196,8 +327,7 @@ class _Reader:
 
     def insert(self, node: exp.Insert) -> None:
         target = node.this
-        table_node = target.this if isinstance(target, exp.Schema) else target
-        table = self.tables.get(table_node.name.lower())
+        table = self.find(target)
         if table is None:
             self.skipped["INSERT into a table the file never creates"] += 1
             return
@@ -214,7 +344,7 @@ class _Reader:
             self.skipped["INSERT that does not match its table"] += 1
 
     def copy(self, header: re.Match[str], lines: list[str]) -> None:
-        table = self.tables.get(exp.to_table(header.group(1), dialect="postgres").name.lower())
+        table = self.find(exp.to_table(header.group(1), dialect="postgres"))
         if table is None:
             self.skipped["COPY into a table the file never creates"] += 1
             return

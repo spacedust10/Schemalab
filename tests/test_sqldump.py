@@ -162,3 +162,35 @@ def test_table_and_column_names_become_safe_identifiers(tmp_path: Path) -> None:
     [table] = read_dump(text, tmp_path).tables
     assert table.name == "sales_data"
     assert [c for c, _ in table.columns] == ["order_id", "order_id_2"]
+
+
+SCHEMAS_SQL = (Path(__file__).parent / "fixtures" / "schemas.sql").read_text()
+
+
+def test_tables_nested_in_create_schema_are_read(tmp_path: Path) -> None:
+    dump = read_dump(SCHEMAS_SQL, tmp_path)
+    names = [t.name for t in dump.tables]
+    # Two schemas each have a Customer table; the second keeps its schema in its name.
+    assert names == ["businessentity", "person", "customer", "crm_customer"]
+    person = dump.tables[1]
+    assert person.columns == [
+        ("businessentityid", "INT"),
+        ("firstname", "VARCHAR(50)"),  # the "Name" domain
+        ("active", "BOOLEAN"),
+    ]
+    assert dump.tables[2].columns[2] == ("note", "VARCHAR(20)")
+
+
+def test_keys_added_later_resolve_across_schemas(tmp_path: Path) -> None:
+    keys = read_dump(SCHEMAS_SQL, tmp_path).keys
+    assert keys[("person", "businessentityid")] == "references businessentity(businessentityid)"
+    assert keys[("customer", "personid")] == "references person(businessentityid)"
+    assert keys[("crm_customer", "salescustomerid")] == "references customer(customerid)"
+
+
+def test_psql_copy_from_files_is_counted_so_the_user_knows_rows_are_missing(
+    tmp_path: Path,
+) -> None:
+    dump = read_dump(SCHEMAS_SQL, tmp_path)
+    assert all(t.row_count == 0 for t in dump.tables)
+    assert dump.skipped[r"\copy from a CSV file not in this upload"] == 2

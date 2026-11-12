@@ -172,3 +172,23 @@ def test_eer_round_trips_through_ddl() -> None:
     assert sorted(
         (r.left.entity, r.right.entity, r.kind, r.identifying) for r in again.relationships
     ) == sorted((r.left.entity, r.right.entity, r.kind, r.identifying) for r in m.relationships)
+
+
+def test_from_ddl_reads_tables_nested_in_create_schema() -> None:
+    sql = (Path(__file__).parent / "fixtures" / "schemas.sql").read_text()
+    m = from_ddl(sql)
+    assert [e.name for e in m.entities] == ["BusinessEntity", "Person", "Customer", "CrmCustomer"]
+    assert [a.type for a in entity(m, "Person").attributes if a.name == "FirstName"] == [
+        "VARCHAR(50)"
+    ]
+    assert m.specializations == [Specialization("BusinessEntity", ["Person"])]
+    got = {(r.left.entity, r.right.entity) for r in m.relationships}
+    assert got == {("Person", "Customer"), ("Customer", "CrmCustomer")}
+
+
+def test_a_bracket_in_postgres_sql_does_not_mean_sql_server() -> None:
+    m = from_ddl(
+        "CREATE TABLE a (id INT PRIMARY KEY, tags TEXT[] DEFAULT ARRAY['x']);"
+        "CREATE TABLE b (id INT PRIMARY KEY, a_id INT REFERENCES a(id));"
+    )
+    assert [e.name for e in m.entities] == ["A", "B"] and len(m.relationships) == 1
