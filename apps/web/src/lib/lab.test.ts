@@ -38,9 +38,14 @@ describe("lab routes", () => {
       return Response.json({});
     });
     await POST(new NextRequest("http://localhost:3000/api/lab/run", { method: "POST", headers, body: "{}" }), params("run"));
+    await POST(new NextRequest("http://localhost:3000/api/lab/explain", { method: "POST", headers, body: "{}" }), params("explain"));
     await GET(new NextRequest("http://localhost:3000/api/lab/result?session=B&x=1", { headers }), params("result"));
     expect((await POST(new NextRequest("http://localhost:3000/api/lab/x", { method: "POST", headers, body: "{}" }), params("../auth"))).status).toBe(404);
-    expect(calls).toEqual(["http://localhost:8000/lab/run", "http://localhost:8000/lab/result?session=B"]);
+    expect(calls).toEqual([
+      "http://localhost:8000/lab/run",
+      "http://localhost:8000/lab/explain",
+      "http://localhost:8000/lab/result?session=B",
+    ]);
   });
 
   it("refuses cross-site posts", async () => {

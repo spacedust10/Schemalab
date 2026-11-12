@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Plans: run EXPLAIN ANALYZE on your lab tables and see where the time goes (own time per node, actual vs estimated rows, misestimates flagged). An index advisor suggests CREATE INDEX statements with the evidence, and one click creates the index and compares the timings. Step-through B+ tree and extendible hashing animations.
+- Design: one input takes design text, CREATE TABLE statements or a .sql file, including whole pg_dump and mysqldump files.
 - Schedules and recovery: check a schedule's precedence graph, conflict and view serializability, recoverability classes, and whether basic, strict or rigorous 2PL could produce it (with locks written in); replay a write-ahead log through ARIES analysis, redo and undo with CLRs.
 - Transaction lab: two real PostgreSQL sessions per user in a sandbox database, with live transaction states, who waits for whom, the lock table and row versions (xmin, xmax). Nine guided scenarios: non-repeatable read, REPEATABLE READ's snapshot, phantom read, lost update, SELECT ... FOR UPDATE, serialization failure, write skew, SERIALIZABLE and deadlock.
 - Algebra: write relational algebra (σ π ρ γ τ ⋈ × ∪ − ∩, or words) or SQL, get the other form and the query tree, and run it on the sample data or your tables through the SQL guard.

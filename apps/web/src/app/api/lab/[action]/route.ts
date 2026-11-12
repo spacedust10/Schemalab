@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, rejectCrossSite, upstream } from "@/lib/api";
 
-const POSTS = new Set(["start", "stop", "run", "scenario"]);
+const POSTS = new Set(["start", "stop", "run", "scenario", "explain"]);
 const GETS = new Set(["state", "result", "scenarios"]);
 type Params = { params: Promise<{ action: string }> };
 
