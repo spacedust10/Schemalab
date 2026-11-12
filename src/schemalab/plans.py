@@ -63,8 +63,13 @@ def summarize(raw: list[dict[str, Any]]) -> dict[str, Any]:
 
     walk(top["Plan"], None, 0)
     nodes.sort(key=lambda n: n["id"])
+
+    def rows(count: float) -> str:
+        whole = round(count)
+        return f"{whole} row" if whole == 1 else f"{whole} rows"
+
     warnings = [
-        f"{n['label']}: estimated {round(n['est_rows'] / n['loops'])} rows, got "
+        f"{n['label']}: estimated {rows(n['est_rows'] / n['loops'])}, got "
         f"{round(n['rows'] / n['loops'])} per loop ({n['misestimate']:g}x). The planner's "
         "statistics may be stale; ANALYZE the table."
         for n in nodes
