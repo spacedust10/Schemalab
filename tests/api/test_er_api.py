@@ -50,16 +50,6 @@ def test_unknown_dialect_is_422(client: TestClient) -> None:
     assert post(client, "/er/ddl", {"design": DESIGN, "dialect": "db2"}).status_code == 422
 
 
-def test_ddl_to_design(client: TestClient) -> None:
-    ddl = (
-        "CREATE TABLE a (id INT PRIMARY KEY);"
-        "CREATE TABLE b (id INT PRIMARY KEY, a_id INT REFERENCES a(id));"
-    )
-    got = post(client, "/er/from-ddl", {"ddl": ddl}).json()
-    assert got["design"].startswith("entity A { id int key }")
-    assert got["model"]["relationships"][0]["kind"] == "1:N"
-
-
 def test_english_to_design_uses_the_model(app: FastAPI, client: TestClient) -> None:
     gw = ScriptedGateway(f"```\n{DESIGN}\n```")
     app.dependency_overrides[get_gateway] = lambda: gw
@@ -100,3 +90,25 @@ def test_design_from_the_users_uploaded_dump(client: TestClient) -> None:
 def test_design_from_uploads_without_any(client: TestClient) -> None:
     resp = client.get("/er/mine", headers=register(client))
     assert resp.status_code == 400 and "Upload" in resp.json()["detail"]
+
+
+def test_the_design_box_also_takes_create_table_statements(client: TestClient) -> None:
+    sql = (
+        "CREATE TABLE a (id INT PRIMARY KEY);\n"
+        "CREATE TABLE b (id INT PRIMARY KEY, a_id INT REFERENCES a(id));"
+    )
+    got = post(client, "/er/ddl", {"design": sql}).json()
+    assert got["source"] == "sql"
+    assert [e["name"] for e in got["model"]["entities"]] == ["A", "B"]
+    assert got["model"]["relationships"][0]["kind"] == "1:N"
+
+
+def test_design_text_is_still_read_as_design(client: TestClient) -> None:
+    assert post(client, "/er/ddl", {"design": DESIGN}).json()["source"] == "design"
+
+
+def test_a_whole_dump_file_fits(client: TestClient) -> None:
+    rows = "\n".join(f"INSERT INTO a VALUES ({i});" for i in range(8000))
+    dump = f"CREATE TABLE a (id INT PRIMARY KEY);\n{rows}"
+    assert len(dump) > 100_000
+    assert post(client, "/er/ddl", {"design": dump}).status_code == 200

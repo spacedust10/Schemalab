@@ -1,4 +1,4 @@
-"""ER designer: design text -> DDL, DDL -> design, English -> design, uploads -> design."""
+"""ER designer: design text or SQL -> diagram and DDL, English -> design, uploads -> design."""
 
 import re
 from dataclasses import asdict
@@ -21,12 +21,9 @@ Dialect = Literal["postgres", "mysql", "sqlite", "tsql", "oracle"]
 
 
 class DesignRequest(BaseModel):
-    design: Annotated[str, StringConstraints(max_length=20_000)]
+    # The design text, or CREATE TABLE statements, or a whole .sql dump loaded from a file.
+    design: Annotated[str, StringConstraints(max_length=1_000_000)]
     dialect: Dialect = "postgres"
-
-
-class DdlRequest(BaseModel):
-    ddl: Annotated[str, StringConstraints(max_length=200_000)]
 
 
 class EnglishRequest(BaseModel):
@@ -53,18 +50,10 @@ def _bad(e: Exception) -> HTTPException:
 @router.post("/ddl")
 def design_to_ddl(user: UserDep, body: DesignRequest) -> dict[str, Any]:
     try:
-        model = er.parse(body.design)
+        model, source = er.read_any(body.design)
     except er.ERError as e:
         raise _bad(e) from None
-    return {**_design(model), "ddl": er.to_ddl(model, body.dialect)}
-
-
-@router.post("/from-ddl")
-def ddl_to_design(user: UserDep, body: DdlRequest) -> dict[str, Any]:
-    try:
-        return _design(er.from_ddl(body.ddl))
-    except er.ERError as e:
-        raise _bad(e) from None
+    return {**_design(model), "ddl": er.to_ddl(model, body.dialect), "source": source}
 
 
 @router.post("/from-english")

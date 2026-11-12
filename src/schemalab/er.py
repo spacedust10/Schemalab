@@ -380,6 +380,24 @@ def _dependency_order(tables: list[_Table]) -> list[_Table]:
     return done
 
 
+# Either form
+
+
+_CREATE_TABLE = re.compile(r"\bcreate\s+(?:temp(?:orary)?\s+)?table\b", re.IGNORECASE)
+
+
+def read_any(text: str) -> tuple[Model, str]:
+    """A design from either the ER text format or SQL; says which ("design" or "sql").
+
+    SQL is recognized by a CREATE TABLE outside comments: the design format has no such words,
+    so pasted DDL and uploaded dump files need no separate button.
+    """
+    code = "\n".join(re.split(r"--|#", line, maxsplit=1)[0] for line in text.splitlines())
+    if _CREATE_TABLE.search(code):
+        return from_ddl(text), "sql"
+    return parse(text), "design"
+
+
 # DDL -> ER
 
 
