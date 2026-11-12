@@ -587,6 +587,137 @@ pre.sql {
   color: var(--ink-2);
 }
 
+/* Transaction lab */
+.lab-controls .field {
+  min-width: min(100%, 22rem);
+}
+.lab-guide {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 90ch;
+}
+.lab-steps {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
+}
+.lab-steps li.done {
+  color: var(--ink-2);
+}
+.lab-steps li[aria-current="step"] {
+  font-weight: 700;
+}
+.lab-steps code,
+.lab-sql {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.lab-expect {
+  font-weight: 400;
+}
+.lab-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6em;
+  height: 1.6em;
+  margin-right: var(--space-2);
+  border-radius: 4px;
+  font: 700 var(--step--1) / 1 var(--sans);
+  color: var(--paper);
+}
+.lab-A {
+  background: var(--accent);
+}
+.lab-B {
+  background: var(--object);
+}
+.lab-lesson {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--rule);
+}
+.lab-consoles {
+  display: grid;
+  gap: var(--space-5);
+}
+@media (min-width: 1024px) {
+  .lab-consoles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.lab-console {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.lab-console-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+.lab-console-head h2 {
+  display: flex;
+  align-items: center;
+  font-size: var(--step-1);
+}
+.lab-status {
+  font-size: var(--step--1);
+  font-weight: 700;
+}
+.lab-status.tone-high {
+  color: var(--ok);
+}
+.lab-status.tone-medium,
+.lab-out.tone-medium,
+td.tone-medium {
+  color: var(--caution);
+}
+.lab-out.tone-low {
+  color: var(--object);
+}
+.lab-log {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 26rem;
+  overflow: auto;
+}
+.lab-log li {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--rule);
+}
+.lab-input {
+  display: grid;
+  gap: var(--space-2);
+}
+.lab-input textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--mono);
+}
+.lab-input .button {
+  justify-self: start;
+}
+.lab-inside {
+  display: grid;
+  gap: var(--space-3);
+}
+
 /* Algebra and constraint coach */
 .palette {
   display: flex;
