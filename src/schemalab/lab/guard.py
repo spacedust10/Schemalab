@@ -27,7 +27,8 @@ class LabSQLError(ValueError):
 
 
 def _code(sql: str) -> tuple[str, int]:
-    """The SQL with comments and quoted text blanked out, and the number of semicolons in it."""
+    """The SQL with comments and string literals blanked out and quoted names unquoted, so
+    "set_config" reads as set_config, plus the number of semicolons in it."""
     out: list[str] = []
     i, semicolons = 0, 0
     while i < len(sql):
@@ -39,6 +40,8 @@ def _code(sql: str) -> tuple[str, int]:
             end = sql.find("*/", i + 2)
             i = len(sql) if end < 0 else end + 2
         elif ch in "'\"":
+            if "".join(out[-2:]).upper() == "U&":
+                raise LabSQLError("Unicode-escaped names and strings are not allowed in the lab.")
             j = i + 1
             while j < len(sql):
                 if sql[j] == ch and sql[j + 1 : j + 2] == ch:
@@ -47,7 +50,8 @@ def _code(sql: str) -> tuple[str, int]:
                     break
                 else:
                     j += 1
-            out.append(" ")
+            # A string literal is data; a double-quoted name is code and stays visible.
+            out.append(" " if ch == "'" else " " + sql[i + 1 : j].replace('""', '"') + " ")
             i = j + 1
         elif ch == "$":
             raise LabSQLError(
@@ -71,9 +75,11 @@ def check_lab_sql(sql: str) -> str:
     code, semicolons = _code(statement)
     if semicolons:
         raise LabSQLError("Run one statement at a time, so you can see what each one does.")
-    if re.search(r"\bset_config\s*\(", code, re.IGNORECASE):
-        # SELECT set_config('statement_timeout', '0', false) would switch the timeout off.
-        raise LabSQLError("set_config is not allowed; the lab's timeouts stay on.")
+    # set_config(...) and UPDATE pg_settings change settings without SET; the sandbox database
+    # also revokes both from PUBLIC, so this is the first of two layers.
+    for name in ("set_config", "pg_settings"):
+        if re.search(rf"\b{name}\b", code, re.IGNORECASE):
+            raise LabSQLError(f"{name} is not allowed; the lab's timeouts stay on.")
     words = code.split()
     first = words[0].upper()
     if first == "SET" and not _ALLOWED.match(code.strip()):

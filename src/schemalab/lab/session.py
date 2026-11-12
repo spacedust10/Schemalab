@@ -83,6 +83,11 @@ class Lab:
             database = sql.Identifier(a.info.dbname)
             a.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(database))
             a.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
+            # Settings can change without SET; take both other routes away from lab roles.
+            a.execute(
+                "REVOKE EXECUTE ON FUNCTION pg_catalog.set_config(text, text, boolean) FROM PUBLIC"
+            )
+            a.execute("REVOKE UPDATE ON pg_catalog.pg_settings FROM PUBLIC")
             exists = a.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", [self.role]).fetchone()
             if exists:
                 self._terminate()
@@ -100,6 +105,7 @@ class Lab:
                 ("statement_timeout", STATEMENT_TIMEOUT),
                 ("idle_in_transaction_session_timeout", IDLE_TIMEOUT),
                 ("lock_timeout", "0"),
+                ("temp_file_limit", "100MB"),  # superuser-only setting: the role cannot raise it
                 ("search_path", self.role),
             ):
                 a.execute(

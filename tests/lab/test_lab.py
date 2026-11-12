@@ -45,6 +45,7 @@ def test_a_statement_runs_and_returns_rows(lab: Lab) -> None:
 def test_the_session_timeouts_are_fixed_for_the_role(lab: Lab) -> None:
     assert lab.run("A", "SHOW statement_timeout")["rows"] == [["30s"]]
     assert lab.run("A", "SHOW idle_in_transaction_session_timeout")["rows"] == [["5min"]]
+    assert lab.run("A", "SHOW temp_file_limit")["rows"] == [["100MB"]]
 
 
 def test_the_lab_role_cannot_read_server_files(lab: Lab) -> None:
@@ -127,3 +128,17 @@ def test_reset_drops_the_users_tables(lab: Lab) -> None:
     lab.reset()
     out = lab.run("A", "SELECT * FROM accounts")
     assert out["state"] == "error" and "does not exist" in str(out["error"])
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT set_config('statement_timeout', '0', false)",
+        "UPDATE pg_settings SET setting = '0' WHERE name = 'statement_timeout'",
+    ],
+)
+def test_the_database_itself_refuses_to_lift_the_timeout(lab: Lab, statement: str) -> None:
+    # Second layer: even a statement that slipped past the guard cannot change the timeout.
+    out = lab._execute("A", statement)
+    assert out["state"] == "error" and "permission denied" in str(out["error"])
+    assert lab.run("A", "SHOW statement_timeout")["rows"] == [["30s"]]
