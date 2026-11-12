@@ -95,7 +95,7 @@ export function BenchView() {
         <h2 id="bench-about">About these numbers</h2>
         <ul className="notes">
           <li>Each query runs {result?.reps ?? 3} times on each engine; the page shows the median. Both engines run on this server, so its load affects them.</li>
-          <li>The data comes from DuckDB&apos;s dbgen and dsdgen, then is copied into PostgreSQL and analyzed. PostgreSQL has no indexes beyond what the data needs, as in the TPC kits.</li>
+          <li>The data comes from DuckDB&apos;s dbgen and dsdgen, then is copied into PostgreSQL and analyzed. Neither engine gets keys or indexes, so PostgreSQL scans where an index would help; the Plans page shows what one changes.</li>
           <li>Queries are the standard TPC text, translated to PostgreSQL by sqlglot. A query that times out after 30 seconds counts as failed.</li>
           <li>Derived from the TPC-H and TPC-DS kits; not comparable to published TPC results.</li>
         </ul>
@@ -164,6 +164,7 @@ function RatioChart({ result }: { result: BenchResult }) {
       x: {
         type: "log",
         domain: [1 / span, span],
+        ticks: [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((e) => 10 ** e).filter((t) => t >= 1 / span && t <= span),
         grid: true,
         label: "← PostgreSQL faster · DuckDB faster →",
         labelAnchor: "center",
