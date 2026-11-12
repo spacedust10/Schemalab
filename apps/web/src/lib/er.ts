@@ -183,3 +183,12 @@ export function orbitSlots(n: number, taken: number[]): number[] {
   }
   return out;
 }
+
+/** The design box takes files up to 1 MB, matching the API's limit on the design text. */
+export const MAX_DESIGN_FILE = 1_000_000;
+
+export function designFileProblem(size: number): string | null {
+  if (size === 0) return "That file is empty.";
+  if (size > MAX_DESIGN_FILE) return "Files can be at most 1 MB here; for bigger dumps, upload them on Your data.";
+  return null;
+}

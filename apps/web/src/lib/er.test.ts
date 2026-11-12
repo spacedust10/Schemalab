@@ -109,3 +109,15 @@ describe("er routes", async () => {
     expect(calls).toEqual(["http://localhost:8000/er/ddl", "http://localhost:8000/er/mine"]);
   });
 });
+
+describe("designFileProblem", async () => {
+  const { designFileProblem, MAX_DESIGN_FILE } = await import("./er");
+  it("accepts any non-empty file up to the limit", () => {
+    expect(designFileProblem(1)).toBeNull();
+    expect(designFileProblem(MAX_DESIGN_FILE)).toBeNull();
+  });
+  it("explains empty and oversized files", () => {
+    expect(designFileProblem(0)).toBe("That file is empty.");
+    expect(designFileProblem(MAX_DESIGN_FILE + 1)).toBe("Files can be at most 1 MB here; for bigger dumps, upload them on Your data.");
+  });
+});

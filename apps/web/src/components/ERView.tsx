@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import type { ERModel } from "@/lib/er";
+import { type ERModel, designFileProblem } from "@/lib/er";
 import { errorText, postJSON } from "@/lib/post";
 import { ERDiagram, type Notation } from "./ERDiagram";
 
@@ -26,7 +26,7 @@ relationship Enrolls: Student M -- N Course! { grade text }
 relationship Heads: Professor 1 -- 1 Department!
 `;
 
-type Result = { design: string; model: ERModel; ddl: string };
+type Result = { design: string; model: ERModel; ddl: string; source: "design" | "sql" };
 
 export function ERView() {
   const router = useRouter();
@@ -37,7 +37,6 @@ export function ERView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [english, setEnglish] = useState("");
-  const [sql, setSql] = useState("");
   const [copied, setCopied] = useState(false);
 
   const call = useCallback(
@@ -88,6 +87,17 @@ export function ERView() {
     await generate(got.design, dialect);
   }
 
+  async function loadFile(input: HTMLInputElement) {
+    const file = input.files?.[0];
+    input.value = ""; // picking the same file again should load it again
+    if (!file) return;
+    const problem = designFileProblem(file.size);
+    if (problem) return setError(problem);
+    const text = await file.text();
+    setDesign(text);
+    await generate(text, dialect);
+  }
+
   function download() {
     if (!result) return;
     const url = URL.createObjectURL(new Blob([result.ddl], { type: "application/sql" }));
@@ -103,24 +113,29 @@ export function ERView() {
       <header className="data-head">
         <h1>Design a schema</h1>
         <p className="lede">
-          Write entities and relationships, or start from a description, existing CREATE TABLE
-          statements or your uploaded tables. See the design as a Chen or crow&apos;s-foot
-          diagram and get the tables in five SQL dialects.
+          Write entities and relationships, or paste CREATE TABLE statements, or load a .sql file.
+          See the design as a Chen or crow&apos;s-foot diagram, and get design text turned into
+          tables in five SQL dialects.
         </p>
       </header>
 
       <section className="er-input" aria-label="Design">
         <div className="field">
-          <label htmlFor="design">Design</label>
+          <label htmlFor="design">Design or SQL</label>
           <textarea id="design" className="mono" rows={12} value={design} onChange={(e) => setDesign(e.target.value)} spellCheck={false} aria-describedby="design-hint" />
           <p id="design-hint" className="hint">
-            <code>entity Name {"{ id int key, name text }"}</code> and{" "}
-            <code>relationship Name: A 1 -- N B {"{ attr type }"}</code>. Use <code>M -- N</code>{" "}
-            for many-to-many and <code>!</code> after an entity when every row must take part.
+            Design text: <code>entity Name {"{ id int key, name text }"}</code> and{" "}
+            <code>relationship Name: A 1 -- N B {"{ attr type }"}</code>, with <code>M -- N</code>{" "}
+            for many-to-many and <code>!</code> when every row must take part. Or paste CREATE
+            TABLE statements; a whole dump works, and keys added by ALTER TABLE are read too.
           </p>
         </div>
+        <div className="field upload">
+          <label htmlFor="design-file">Or load a file of SQL statements (.sql or plain text, up to 1 MB)</label>
+          <input id="design-file" type="file" accept=".sql,.ddl,.txt,text/plain,application/sql" disabled={busy !== null} onChange={(e) => void loadFile(e.currentTarget)} />
+        </div>
         <button className="button" type="button" disabled={busy !== null} onClick={() => void generate(design, dialect)}>
-          {busy ?? "Draw and generate SQL"}
+          {busy ?? "Draw"}
         </button>
 
         <div className="er-sources">
@@ -133,16 +148,6 @@ export function ERView() {
             </div>
             <button className="button quiet" type="button" disabled={busy !== null || !english.trim()} onClick={() => void load("Drafting…", () => postJSON("/api/er/from-english", { description: english }))}>
               Draft design
-            </button>
-          </details>
-          <details>
-            <summary>Read CREATE TABLE statements</summary>
-            <div className="field">
-              <label htmlFor="sql">SQL</label>
-              <textarea id="sql" className="mono" rows={6} value={sql} onChange={(e) => setSql(e.target.value)} spellCheck={false} placeholder="CREATE TABLE student (sid INT PRIMARY KEY, ...);" />
-            </div>
-            <button className="button quiet" type="button" disabled={busy !== null || !sql.trim()} onClick={() => void load("Reading…", () => postJSON("/api/er/from-ddl", { ddl: sql }))}>
-              Read SQL
             </button>
           </details>
           <button className="button quiet" type="button" disabled={busy !== null} onClick={() => void load("Reading…", () => fetch("/api/er/mine"))}>
@@ -173,9 +178,13 @@ export function ERView() {
                 ))}
               </fieldset>
             </div>
+            {result.source === "sql" && (
+              <p className="hint">Read from your CREATE TABLE statements; you already have their SQL.</p>
+            )}
             <ERDiagram model={result.model} notation={notation} />
           </section>
 
+          {result.source === "design" && (
           <section aria-labelledby="ddl">
             <div className="er-bar">
               <h2 id="ddl">SQL</h2>
@@ -214,6 +223,7 @@ export function ERView() {
               <code>{result.ddl}</code>
             </pre>
           </section>
+          )}
         </>
       )}
     </main>
