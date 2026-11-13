@@ -319,6 +319,7 @@ class _Reader:
                 if (
                     own
                     and isinstance(c.kind, exp.NotNullColumnConstraint)
+                    and not c.kind.args.get("allow_null")  # sqlglot's form of an explicit NULL
                     and own not in table.not_null
                 ):
                     table.not_null.append(own)

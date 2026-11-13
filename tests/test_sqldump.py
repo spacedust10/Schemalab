@@ -197,3 +197,10 @@ def test_psql_copy_from_files_is_counted_so_the_user_knows_rows_are_missing(
     dump = read_dump(SCHEMAS_SQL, tmp_path)
     assert all(t.row_count == 0 for t in dump.tables)
     assert dump.skipped[r"\copy from a CSV file not in this upload"] == 2
+
+
+def test_an_explicit_null_is_not_recorded_as_not_null(tmp_path: Path) -> None:
+    dump = read_dump(
+        "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, title VARCHAR(8) NULL);", tmp_path
+    )
+    assert dump.tables[0].not_null == ["id"]

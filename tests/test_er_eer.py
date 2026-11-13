@@ -275,3 +275,12 @@ def test_a_table_level_check_defines_a_total_specialization() -> None:
         "  FOREIGN KEY (id, kind) REFERENCES p (id, kind));"
     )
     assert m.specializations == [Specialization("P", ["A", "B"], True, True, "kind")]
+
+
+def test_an_explicit_null_column_is_optional_not_required() -> None:
+    m = from_ddl(
+        "CREATE TABLE t (id INT PRIMARY KEY);"
+        "CREATE TABLE u (id INT PRIMARY KEY, t_id INT NULL REFERENCES t(id));"
+    )
+    [r] = m.relationships
+    assert r.right.total is False  # NULL means a u need not have a t

@@ -778,7 +778,10 @@ def _read_table(create: exp.Create) -> _Parsed:
             kind = item.args.get("kind")
             p.columns.append((item.name, kind.sql() if kind else "TEXT"))
             for c in item.constraints:
-                if isinstance(c.kind, exp.NotNullColumnConstraint):
+                # sqlglot reads an explicit NULL as NOT NULL with allow_null set.
+                if isinstance(c.kind, exp.NotNullColumnConstraint) and not c.kind.args.get(
+                    "allow_null"
+                ):
                     p.not_null.add(item.name)
                 elif isinstance(c.kind, exp.PrimaryKeyColumnConstraint):
                     p.primary.append(item.name)
