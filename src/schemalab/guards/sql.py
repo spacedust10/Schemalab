@@ -56,6 +56,10 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
         raise UnsafeSQLError(f"only SELECT queries are allowed, got {tree.key.upper()}")
 
     for node in tree.walk():
+        # LATERAL may wrap a subquery; around anything else it is a table function call
+        # (LATERAL read_csv(...)) that the table check below would never see.
+        if isinstance(node, exp.Lateral) and not isinstance(node.this, exp.Subquery):
+            raise UnsafeSQLError("LATERAL is only allowed around a subquery")
         if isinstance(node, _FORBIDDEN_NODES):
             raise UnsafeSQLError(f"{node.key.upper()} is not allowed")
         if isinstance(node, exp.Func) and node.name.lower() in _FORBIDDEN_FUNCTIONS:

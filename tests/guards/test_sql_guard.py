@@ -170,3 +170,20 @@ def test_sql_the_parser_cannot_tokenize_is_refused_not_raised() -> None:
     # the answer stream with no message.
     with pytest.raises(UnsafeSQLError, match="could not parse SQL"):
         check_sql("SELECT * FROM trips WHERE name = 'unclosed", {"trips"})
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM (SELECT * FROM orders) o, LATERAL read_csv('/etc/passwd')",
+        "SELECT * FROM orders o CROSS JOIN LATERAL read_parquet('x.parquet')",
+    ],
+)
+def test_table_functions_behind_lateral_are_refused(sql: str) -> None:
+    with pytest.raises(UnsafeSQLError, match="LATERAL"):
+        check_sql(sql, TABLES)
+
+
+def test_lateral_subqueries_are_still_allowed() -> None:
+    sql = "SELECT * FROM orders o, LATERAL (SELECT * FROM customers c WHERE c.id = o.customer_id)"
+    assert check_sql(sql, TABLES)
