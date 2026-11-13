@@ -78,10 +78,10 @@ def ident(text: str, taken: set[str] | None = None) -> str:
 
 def read_dump(text: str, work: Path) -> Dump:
     sql, copies, meta = prepare(text)
-    dialect = "mysql" if "`" in sql else "postgres"
+    dialect = "mysql" if "`" in sql else "tsql" if TSQL_NAMES.search(sql) else "postgres"
     try:
         statements = sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.IGNORE)
-    except SqlglotError as e:
+    except (SqlglotError, AttributeError, TypeError) as e:  # sqlglot can fail oddly on bad SQL
         first = str(e).splitlines()[0] if str(e) else type(e).__name__
         raise DumpError(f"Could not read the SQL: {first}") from None
 
@@ -100,6 +100,9 @@ def read_dump(text: str, work: Path) -> Dump:
     return Dump(list(reader.tables.values()), reader.keys, reader.skipped)
 
 
+# Bracketed names like [dbo].[t] mean SQL Server; a bracket alone (ARRAY[1]) does not.
+TSQL_NAMES = re.compile(r"\[[A-Za-z_][\w ]*\]\s*[.(]")
+_GO = re.compile(r"^\s*GO\s*;?\s*$", re.IGNORECASE)  # SQL Server's batch separator
 _LEADING_COMMENTS = re.compile(r"\A(?:\s+|--[^\n]*(?:\n|\Z)|/\*.*?\*/)*", re.S)
 _META = re.compile(r"^\s*\\(\w+)")
 _SCHEMA_HEAD = re.compile(
@@ -125,6 +128,8 @@ def prepare(text: str) -> tuple[str, list[tuple[re.Match[str], list[str]]], Coun
     kept = []
     for line in sql.splitlines():
         meta = _META.match(line)
+        if _GO.match(line):
+            continue
         if not meta:
             kept.append(line)
         elif meta[1].lower() == "copy":
@@ -253,6 +258,8 @@ class _Reader:
             self.insert(node)
         elif isinstance(node, exp.Alter) and (self.alter_columns(node) | self.alter_keys(node)):
             return
+        elif isinstance(node, exp.Drop) and node.args.get("kind") == "TABLE":
+            self.drop(node)
         else:
             self.skipped[_kind(node)] += 1
 
@@ -284,6 +291,19 @@ class _Reader:
         table = DumpTable(name, columns, self.work / f"{name}.csv", source_columns=source_columns)
         self.tables[f"{db.name.lower()}.{source.lower()}" if db else source.lower()] = table
         self.add_keys(table, schema)
+
+    def drop(self, node: exp.Drop) -> None:
+        """A script that drops a table and creates it again means the new one, under its name."""
+        for target in node.args.get("tables") or []:
+            table = self.find(target)
+            if table is None:  # DROP TABLE IF EXISTS before the first CREATE: nothing to do
+                self.skipped["DROP TABLE"] += 1
+                continue
+            if table.name in self._files:
+                self._files.pop(table.name)[0].close()
+            table.csv.unlink(missing_ok=True)
+            self.keys = {k: v for k, v in self.keys.items() if k[0] != table.name}
+            self.tables = {k: t for k, t in self.tables.items() if t is not table}
 
     def alter_columns(self, node: exp.Alter) -> bool:
         """ADD and DROP COLUMN, while the table has no rows yet (the CSV file opens with its
@@ -483,6 +503,9 @@ def _type(kind: exp.DataType | None) -> str:
         return _SERIAL[kind.this]
     if kind.this == _DT.USERDEFINED:
         return "VARCHAR"
+    if kind.this in exp.DataType.INTEGER_TYPES:
+        # MySQL's int(11) is a display width, not a size; DuckDB has no such form.
+        return exp.DataType.build(kind.this).sql()
     sql = kind.sql()  # generic names (VARCHAR(40), DECIMAL(10, 2)); `uploads` checks them
     return sql if _SAFE_TYPE.fullmatch(sql) else "VARCHAR"
 
@@ -492,7 +515,7 @@ def _const(node: exp.Expr) -> Any:
         return None
     if isinstance(node, exp.Boolean):
         return "true" if node.this else "false"
-    if isinstance(node, exp.Literal):
+    if isinstance(node, exp.Literal | exp.National):  # N'text' in SQL Server scripts
         return node.this
     if isinstance(node, exp.Neg) and isinstance(node.this, exp.Literal):
         return f"-{node.this.this}"

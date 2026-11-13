@@ -228,3 +228,41 @@ def test_a_column_change_after_rows_is_skipped_and_counted(tmp_path: Path) -> No
     )
     assert [c for c, _ in dump.tables[0].columns] == ["a"]
     assert dump.skipped["ALTER TABLE column change after its rows"] == 1
+
+
+def test_mysql_display_widths_keep_integer_types(tmp_path: Path) -> None:
+    dump = read_dump(
+        "CREATE TABLE `orders` (`id` int(11) NOT NULL AUTO_INCREMENT, `n` bigint(20) unsigned,"
+        " `flag` tinyint(1), `total` decimal(10,2), PRIMARY KEY (`id`)) ENGINE=InnoDB;",
+        tmp_path,
+    )
+    assert dump.tables[0].columns == [
+        ("id", "INT"),
+        ("n", "UBIGINT"),
+        ("flag", "TINYINT"),
+        ("total", "DECIMAL(10, 2)"),
+    ]
+
+
+def test_a_sql_server_script_loads(tmp_path: Path) -> None:
+    dump = read_dump(
+        "CREATE TABLE [dbo].[People] ([Id] INT NOT NULL PRIMARY KEY, [Name] NVARCHAR(50));\n"
+        "GO\n"
+        "INSERT INTO [dbo].[People] ([Id], [Name]) VALUES (1, N'Ada');\n"
+        "GO\n",
+        tmp_path,
+    )
+    [people] = dump.tables
+    assert people.name == "people" and people.row_count == 1
+    with people.csv.open() as f:
+        assert list(csv.reader(f))[1] == ["1", "Ada"]
+
+
+def test_a_table_dropped_and_created_again_keeps_its_name(tmp_path: Path) -> None:
+    dump = read_dump(
+        "DROP TABLE IF EXISTS t; CREATE TABLE t (a int); INSERT INTO t VALUES (1);"
+        "DROP TABLE IF EXISTS t; CREATE TABLE t (a int, b int); INSERT INTO t VALUES (1, 2);",
+        tmp_path,
+    )
+    [t] = dump.tables
+    assert t.name == "t" and [c for c, _ in t.columns] == ["a", "b"] and t.row_count == 1
