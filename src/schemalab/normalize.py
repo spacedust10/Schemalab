@@ -138,6 +138,12 @@ def read_attrs(text: str, attrs: list[str], relation: str, line: int = 1) -> Att
 
 
 def closure(attrs: Attrs, fds: list[FD]) -> Attrs:
+    # Every step is built on closures, so counting them bounds a request's whole work.
+    shared = _budget.get()
+    if shared is not None:
+        shared[0] -= 1
+        if shared[0] < 0:
+            raise NormalizeError(_TOO_MANY)
     result = set(attrs)
     changed = True
     while changed:
@@ -218,11 +224,16 @@ def normal_form(attrs: list[str], fds: list[FD]) -> Report:
     prime = frozenset().union(*keys)
 
     partial: list[Violation] = []
+    # Only key attributes on some left side can determine anything on their own. A part's
+    # dependents that a smaller reported part already explains are not repeated.
+    deciders = frozenset().union(*(fd.lhs for fd in cover)) if cover else frozenset()
     for key in keys:
-        for size in range(1, len(key)):
-            for part in combinations(sorted(key), size):
+        candidates = sorted(key & deciders)
+        for size in range(1, min(len(key) - 1, len(candidates)) + 1):
+            for part in combinations(candidates, size):
                 sub = frozenset(part)
-                dependents = (closure(sub, cover) - sub) - prime
+                explained = frozenset().union(*(v.fd.rhs for v in partial if v.fd.lhs < sub))
+                dependents = (closure(sub, cover) - sub) - prime - explained
                 if dependents:
                     fd = FD(sub, dependents)
                     if all(v.fd != fd for v in partial):
@@ -258,7 +269,7 @@ def normal_form(attrs: list[str], fds: list[FD]) -> Report:
 # Work bounds for projecting dependencies, which is exponential in the worst case.
 MAX_SUBSETS = 70_000  # every subset of 16 attributes fits
 MAX_FOUND = 2_000
-MAX_REQUEST_SUBSETS = 200_000  # across every projection one request makes
+MAX_REQUEST_SUBSETS = 200_000  # closures across everything one request computes
 
 _budget: ContextVar[list[int] | None] = ContextVar("normalize_budget", default=None)
 _TOO_MANY = (
@@ -269,7 +280,7 @@ _TOO_MANY = (
 
 @contextmanager
 def budget(subsets: int = MAX_REQUEST_SUBSETS) -> Iterator[None]:
-    """One limit on the closures computed by everything inside, however many projections."""
+    """One limit on the closures computed by everything inside: keys, forms, projections."""
     token = _budget.set([subsets])
     try:
         yield
@@ -286,10 +297,7 @@ def project(fds: list[FD], attrs: list[str]) -> list[FD]:
 
     def plus(x: Attrs) -> Attrs:
         if x not in seen:
-            shared = _budget.get()
-            if shared is not None:
-                shared[0] -= 1
-            if len(seen) >= MAX_SUBSETS or (shared is not None and shared[0] < 0):
+            if len(seen) >= MAX_SUBSETS:
                 raise NormalizeError(_TOO_MANY)
             seen[x] = closure(x, fds)
         return seen[x]

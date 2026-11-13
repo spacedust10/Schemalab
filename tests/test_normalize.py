@@ -271,3 +271,36 @@ def test_one_budget_covers_every_projection_in_a_request() -> None:
     bcnf_decompose(attrs, fds)  # fine on its own
     with budget(50), pytest.raises(NormalizeError, match="too many"):
         bcnf_decompose(attrs, fds)  # each projection is small; together they pass 50
+
+
+def test_the_budget_meters_every_step_not_only_projection() -> None:
+    from schemalab.normalize import budget, normal_form
+
+    names = [f"A{i}" for i in range(16)]
+    attrs, fds = parse(f"R({','.join(names)})", "\n".join(f"A{i} -> A{i + 1}" for i in range(15)))
+    with budget(3), pytest.raises(NormalizeError, match="too many"):
+        normal_form(attrs, fds)  # finds keys and checks forms, without projecting
+
+
+def test_a_wide_table_with_one_partial_dependency_reports_it_once_and_fast() -> None:
+    import time
+
+    from schemalab.normalize import normal_form
+
+    attrs, fds = parse(f"R({','.join(f'A{i}' for i in range(16))})", "A0 -> A1")
+    start = time.perf_counter()
+    report = normal_form(attrs, fds)
+    assert time.perf_counter() - start < 1
+    assert report.form == "1NF"
+    assert [(sorted(v.fd.lhs), sorted(v.fd.rhs)) for v in report.violations] == [(["A0"], ["A1"])]
+
+
+def test_a_larger_part_of_the_key_with_its_own_dependent_is_still_reported() -> None:
+    from schemalab.normalize import normal_form
+
+    attrs, fds = parse("R(A, B, C, D, E)", "A -> D\nA, B -> E")
+    found = {
+        (tuple(sorted(v.fd.lhs)), tuple(sorted(v.fd.rhs)))
+        for v in normal_form(attrs, fds).violations
+    }
+    assert found == {(("A",), ("D",)), (("A", "B"), ("E",))}
