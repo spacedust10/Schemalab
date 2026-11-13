@@ -58,6 +58,7 @@ class Lab:
         self.conns: dict[str, psycopg.Connection[Any]] = {}
         self.planner: psycopg.Connection[Any] | None = None  # a third session for EXPLAIN
         self.plan_lock = threading.Lock()
+        self.pattern_lock = threading.Lock()  # experiments share demo_ tables: one at a time
         self.pools = {s: ThreadPoolExecutor(max_workers=1) for s in SESSIONS}
         self.pending: dict[str, Future[Outcome]] = {}
         self.lock = threading.Lock()
@@ -277,7 +278,8 @@ class Lab:
                 self.admin_dsn, user=self.role, password=self.password, autocommit=True
             )
 
-        return patterns.run(name, mode, connect)
+        with self.pattern_lock:
+            return patterns.run(name, mode, connect)
 
     def explain(self, statement: str) -> dict[str, Any]:
         """EXPLAIN ANALYZE a query and advise on indexes. EXPLAIN ANALYZE runs the query, so it

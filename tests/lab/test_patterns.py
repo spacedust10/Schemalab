@@ -104,3 +104,19 @@ def test_new_order_with_locks_or_atomic_updates_places_every_order(lab: Lab, mod
     got = lab.pattern("new_order", mode)
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert check(got, "Orders placed")["actual"] == 60
+
+
+def test_two_runs_at_once_take_turns_and_both_finish(lab: Lab) -> None:
+    import threading
+
+    results: list[dict[str, Any]] = []
+    threads = [
+        threading.Thread(target=lambda: results.append(lab.pattern("optimistic", "version")))
+        for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert not any(t.is_alive() for t in threads), "a run never finished"
+    assert len(results) == 2 and all(all(c["ok"] for c in r["checks"]) for r in results)

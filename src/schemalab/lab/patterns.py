@@ -22,6 +22,7 @@ WORKERS = 3
 TRANSFERS = 20  # per worker
 AMOUNT = 10
 RACE_PAUSE = 0.005  # seconds between reading and writing, so races show up reliably
+MAX_TRIES = 50  # an optimistic edit retries at most this often
 
 
 def _check(label: str, expected: Any, actual: Any) -> dict[str, Any]:
@@ -223,11 +224,13 @@ def optimistic(mode: str, connect: Connect) -> Result:
     def worker(w: int) -> None:
         with connect() as c:
             for _ in range(EDITS):
-                while True:
+                for _try in range(MAX_TRIES):
                     row = c.execute(
                         "SELECT stock, version FROM demo_products WHERE id = 1"
                     ).fetchone()
-                    stock, version = row if row else (0, 0)
+                    if row is None:
+                        raise RuntimeError("The product row is gone.")
+                    stock, version = row
                     time.sleep(RACE_PAUSE)  # the editor looks at the form
                     if mode == "version":
                         saved = c.execute(
@@ -246,6 +249,8 @@ def optimistic(mode: str, connect: Connect) -> Result:
                             counts["conflicts"] += 1  # someone saved first: read again
                     if saved:
                         break
+                else:
+                    raise RuntimeError(f"An edit lost the race {MAX_TRIES} times in a row.")
 
     started = time.perf_counter()
     _together(worker)
@@ -296,7 +301,7 @@ def outbox(mode: str, connect: Connect) -> Result:
 
     def relay(w: int) -> None:
         with connect() as c:
-            while True:
+            for _batch in range(ORDERS):  # at most one batch per order, even if all go twice
                 with c.transaction():
                     rows = c.execute(_PENDING_LOCKED if mode == "outbox" else _PENDING).fetchall()
                     if not rows:
