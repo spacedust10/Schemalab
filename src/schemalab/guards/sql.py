@@ -43,7 +43,7 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
     """Return the normalized SQL to run, or raise UnsafeSQLError saying why not."""
     try:
         parsed = sqlglot.parse(sql, read="duckdb")
-    except sqlglot.errors.ParseError as e:
+    except sqlglot.errors.SqlglotError as e:  # ParseError, and TokenError for an unclosed quote
         raise UnsafeSQLError(f"could not parse SQL: {e}") from e
     # A trailing comment after the last ';' parses as a bare Semicolon node.
     statements = [s for s in parsed if s is not None and not isinstance(s, exp.Semicolon)]

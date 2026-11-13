@@ -109,3 +109,19 @@ def test_no_model_503_does_not_reveal_config(
     app.dependency_overrides[get_settings] = lambda: Settings(models=["groq/openai/gpt-oss-120b"])
     detail = client.post("/ask", json={"question": "hi"}, headers=register(client)).json()["detail"]
     assert "groq" not in detail.lower() and "GROQ_API_KEY" not in detail
+
+
+def test_a_reply_with_an_unclosed_quote_is_retried_not_fatal(
+    app: FastAPI, client: TestClient
+) -> None:
+    script(app, "Count customers.", "SELECT * FROM customers WHERE name = 'oops", SQL, OK)
+    got = ask(client, register(client), "How many customers?")
+    assert [e["step"] for e in got] == [
+        "schema",
+        "plan",
+        "retry",
+        "sql",
+        "result",
+        "critic",
+        "answer",
+    ]

@@ -163,3 +163,10 @@ def test_recursive_cte_can_reference_itself() -> None:
         "SELECT * FROM n"
     )
     assert check_sql(sql, {"orders"})
+
+
+def test_sql_the_parser_cannot_tokenize_is_refused_not_raised() -> None:
+    # A model reply with an unclosed quote once escaped as a sqlglot TokenError and ended
+    # the answer stream with no message.
+    with pytest.raises(UnsafeSQLError, match="could not parse SQL"):
+        check_sql("SELECT * FROM trips WHERE name = 'unclosed", {"trips"})
