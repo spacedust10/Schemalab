@@ -70,3 +70,24 @@ def test_a_version_column_detects_conflicts_and_keeps_every_edit(lab: Lab) -> No
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert check(got, "Stock after every edit")["actual"] == 115
     assert got["stats"]["conflicts"] > 0  # detected, then retried
+
+
+def test_a_dual_write_loses_events_when_the_app_crashes(lab: Lab) -> None:
+    got = lab.pattern("outbox", "dual_write")
+    assert check(got, "Orders without an event") == {
+        "label": "Orders without an event",
+        "expected": 0,
+        "actual": 5,
+        "ok": False,
+    }
+
+
+def test_relays_without_row_locks_publish_events_twice(lab: Lab) -> None:
+    got = lab.pattern("outbox", "outbox_no_lock")
+    assert check(got, "Orders without an event")["actual"] == 0
+    assert check(got, "Events published twice")["actual"] > 0
+
+
+def test_an_outbox_with_skip_locked_relays_publishes_each_event_once(lab: Lab) -> None:
+    got = lab.pattern("outbox", "outbox")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]

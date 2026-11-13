@@ -262,10 +262,83 @@ def optimistic(mode: str, connect: Connect) -> Result:
     }
 
 
+# Transactional outbox
+
+ORDERS = 20
+CRASH_EVERY = 4  # the application dies right after committing every fourth order
+
+
+def outbox(mode: str, connect: Connect) -> Result:
+    """Place orders and tell the rest of the system about each one (a broker, here a table
+    another service reads)."""
+    with connect() as c:
+        c.execute("DROP TABLE IF EXISTS demo_orders, demo_outbox, demo_broker")
+        c.execute("CREATE TABLE demo_orders (id int PRIMARY KEY, total int NOT NULL)")
+        c.execute(
+            "CREATE TABLE demo_outbox (id serial PRIMARY KEY, order_id int NOT NULL, "
+            "published boolean NOT NULL DEFAULT false)"
+        )
+        c.execute("CREATE TABLE demo_broker (order_id int NOT NULL)")
+    with connect() as app, connect() as broker:
+        for n in range(1, ORDERS + 1):
+            with app.transaction():
+                app.execute("INSERT INTO demo_orders VALUES (%s, %s)", [n, 10 * n])
+                if mode != "dual_write":
+                    app.execute("INSERT INTO demo_outbox (order_id) VALUES (%s)", [n])
+            if n % CRASH_EVERY == 0:
+                continue  # crashed after the commit, before anything else
+            if mode == "dual_write":
+                broker.execute("INSERT INTO demo_broker VALUES (%s)", [n])
+
+    counts = {"orders": ORDERS, "crashes": ORDERS // CRASH_EVERY, "relay_batches": 0}
+    lock = threading.Lock()
+
+    def relay(w: int) -> None:
+        with connect() as c:
+            while True:
+                with c.transaction():
+                    rows = c.execute(_PENDING_LOCKED if mode == "outbox" else _PENDING).fetchall()
+                    if not rows:
+                        return
+                    time.sleep(RACE_PAUSE)  # sending to the broker takes a moment
+                    for event_id, order_id in rows:
+                        c.execute("INSERT INTO demo_broker VALUES (%s)", [order_id])
+                        c.execute(
+                            "UPDATE demo_outbox SET published = true WHERE id = %s", [event_id]
+                        )
+                with lock:
+                    counts["relay_batches"] += 1
+
+    started = time.perf_counter()
+    if mode != "dual_write":
+        _together(relay)
+    with connect() as c:
+        missing, twice = c.execute(
+            "SELECT (SELECT count(*) FROM demo_orders o WHERE NOT EXISTS "
+            "(SELECT 1 FROM demo_broker b WHERE b.order_id = o.id)), "
+            "(SELECT count(*) FROM (SELECT order_id FROM demo_broker GROUP BY order_id "
+            "HAVING count(*) > 1) d)"
+        ).fetchone() or (0, 0)
+    return {
+        "checks": [
+            _check("Orders without an event", 0, missing),
+            _check("Events published twice", 0, twice),
+        ],
+        "stats": counts,
+        "ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
+_PENDING = "SELECT id, order_id FROM demo_outbox WHERE NOT published ORDER BY id LIMIT 5"
+# SKIP LOCKED: each relay takes rows no other relay holds, so no event goes out twice.
+_PENDING_LOCKED = _PENDING + " FOR UPDATE SKIP LOCKED"
+
+
 EXPERIMENTS: dict[str, tuple[Callable[[str, Connect], Result], tuple[str, ...]]] = {
     "transfer": (transfer, ("naive", "for_update", "atomic")),
     "idempotency": (idempotency, ("no_key", "check_first", "key")),
     "optimistic": (optimistic, ("last_write_wins", "version")),
+    "outbox": (outbox, ("dual_write", "outbox_no_lock", "outbox")),
 }
 
 
