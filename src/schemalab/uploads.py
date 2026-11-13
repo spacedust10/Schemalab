@@ -81,7 +81,7 @@ def import_file(db: Path, src: Path, filename: str) -> Imported:
                     result = _load_dump(con, src, Path(work), taken)
                 else:
                     if suffix == ".csv":
-                        sources = [(filename, src, False)]
+                        sources = [(filename, _as_utf8(src, Path(work)), False)]
                     else:
                         sources = _excel_to_csv(src, filename, Path(work))
                     _check_room(taken, len(sources))
@@ -93,10 +93,30 @@ def import_file(db: Path, src: Path, filename: str) -> Imported:
             tmp.replace(db)
             return result
         except duckdb.Error as e:
-            detail = str(e).splitlines()[0]
+            # DuckDB names the server's temp file in some errors; the user needs only theirs.
+            detail = _PATH.sub("the file", str(e).splitlines()[0])
             raise UploadError(f"Could not read {Path(filename).name}: {detail}") from None
         finally:
             tmp.unlink(missing_ok=True)
+
+
+_PATH = re.compile(r"""["']?/[^\s"']+["']?""")
+
+
+def _as_utf8(src: Path, work: Path) -> Path:
+    """The file as UTF-8. Excel saves CSV as Windows-1252 or, as "Unicode Text", UTF-16."""
+    raw = src.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = raw.decode("utf-16")
+    else:
+        try:
+            raw.decode("utf-8")
+            return src
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252", errors="replace")
+    out = work / "utf8.csv"
+    out.write_text(text, encoding="utf-8")
+    return out
 
 
 def _check_room(taken: set[str], adding: int) -> None:
@@ -172,8 +192,11 @@ def _load(
 ) -> str:
     # The name passed table_name's [a-z0-9_] filter; the path is bound. Excel sheets always have
     # a header row; for CSV files DuckDB detects one.
-    options = "normalize_names = true" + (", header = true" if header else "")
+    # null_padding: a short row gets NULLs and a long one an extra column, instead of the
+    # sniffer reading every row as one text column.
+    options = "null_padding = true" + (", header = true" if header else "")
     con.execute(f'CREATE TABLE "{name}" AS SELECT * FROM read_csv(?, {options})', [str(path)])  # noqa: S608
+    _tidy_columns(con, name)
     columns = len(con.execute(f'DESCRIBE "{name}"').fetchall())
     if columns > MAX_COLUMNS:
         raise UploadError(f"A table can have at most {MAX_COLUMNS} columns, not {columns}.")
@@ -182,6 +205,30 @@ def _load(
         raise UploadError("The file has no data rows.")
     taken.add(name)
     return name
+
+
+def _tidy_columns(con: duckdb.DuckDBPyConnection, table: str) -> None:
+    """Lowercase [a-z0-9_] column names; only SQL's reserved words get a leading _."""
+    reserved = {
+        r[0]
+        for r in con.execute(
+            "SELECT keyword_name FROM duckdb_keywords() WHERE keyword_category = 'reserved'"
+        ).fetchall()
+    }
+    taken: set[str] = set()
+    for (old,) in con.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE table_name = ? ORDER BY column_index",
+        [table],
+    ).fetchall():
+        base = ident(old)
+        base = f"_{base}" if base in reserved else base
+        new, n = base, 2
+        while new in taken:
+            new, n = f"{base}_{n}", n + 1
+        taken.add(new)
+        if new != old:
+            quoted = old.replace('"', '""')
+            con.execute(f'ALTER TABLE "{table}" RENAME COLUMN "{quoted}" TO "{new}"')
 
 
 def _excel_to_csv(src: Path, filename: str, work: Path) -> list[tuple[str, Path, bool]]:

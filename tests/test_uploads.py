@@ -1,8 +1,10 @@
 """User uploads: CSV and Excel files become tables in a DuckDB file of the user's own."""
 
+import re
 from datetime import date
 from pathlib import Path
 
+import duckdb
 import openpyxl
 import pytest
 
@@ -91,7 +93,7 @@ def test_each_excel_sheet_becomes_a_table(tmp_path: Path, db: Path) -> None:
     assert tables["sales_q1"]["rows"] == 2
     types = {c["name"]: c["type"] for c in tables["sales_q1"]["columns"]}
     # DuckDB prefixes reserved words ("day") so the model never has to quote a column.
-    assert types == {"region": "VARCHAR", "revenue": "BIGINT", "_day": "DATE"}
+    assert types == {"region": "VARCHAR", "revenue": "BIGINT", "day": "DATE"}
 
 
 def test_single_sheet_workbook_is_named_after_the_file(tmp_path: Path, db: Path) -> None:
@@ -268,3 +270,50 @@ def test_dump_that_is_not_utf8_still_loads(tmp_path: Path, db: Path) -> None:
 
 def test_csv_and_excel_report_nothing_skipped(tmp_path: Path, db: Path) -> None:
     assert import_file(db, csv_file(tmp_path, "a\n1\n"), "t.csv").skipped == {}
+
+
+def columns_of(db: Path, table: str) -> list[str]:
+    return [c["name"] for t in list_tables(db) if t["name"] == table for c in t["columns"]]
+
+
+def test_a_latin1_csv_keeps_its_accents(tmp_path: Path, db: Path) -> None:
+    src = tmp_path / "cities.csv"
+    src.write_bytes("id,city\n1,München\n2,São Paulo\n".encode("latin-1"))  # Excel on Windows
+    import_file(db, src, "cities.csv")
+    with duckdb.connect(str(db)) as con:
+        assert con.execute("SELECT city FROM cities ORDER BY id").fetchall() == [
+            ("München",),
+            ("São Paulo",),
+        ]
+
+
+def test_a_utf16_csv_loads(tmp_path: Path, db: Path) -> None:
+    src = tmp_path / "u.csv"
+    src.write_bytes("id,name\n1,Zoë\n".encode("utf-16"))  # Excel's "Unicode Text"
+    import_file(db, src, "u.csv")
+    with duckdb.connect(str(db)) as con:
+        assert con.execute("SELECT * FROM u").fetchall() == [(1, "Zoë")]
+
+
+def test_an_unreadable_file_is_named_without_server_paths(tmp_path: Path, db: Path) -> None:
+    src = tmp_path / "chart.csv"
+    src.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00binary")
+    with pytest.raises(UploadError) as e:
+        import_file(db, src, "chart.csv")
+    assert "chart.csv" in str(e.value) and str(tmp_path) not in str(e.value)
+    assert not re.search(r"/(var|tmp|private)/", str(e.value))  # no server paths
+
+
+def test_only_reserved_words_get_a_prefix(tmp_path: Path, db: Path) -> None:
+    import_file(db, csv_file(tmp_path, "name,only,First Name,Total ($)\nAda,x,y,1\n"), "people.csv")
+    assert columns_of(db, "people") == ["name", "_only", "first_name", "total"]
+
+
+def test_ragged_rows_keep_their_columns(tmp_path: Path, db: Path) -> None:
+    import_file(db, csv_file(tmp_path, "a,b\n1,2\n4\n5,6\n"), "r.csv")
+    with duckdb.connect(str(db)) as con:
+        assert con.execute("SELECT a, b FROM r ORDER BY a").fetchall() == [
+            (1, 2),
+            (4, None),
+            (5, 6),
+        ]
