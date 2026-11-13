@@ -49,6 +49,10 @@ _TRANSACTION = {
 Outcome = dict[str, Any]
 
 
+class ServerBusy(Exception):
+    """Every experiment slot on the server is taken."""
+
+
 class Lab:
     def __init__(self, admin_dsn: str, user_id: int) -> None:
         self.admin_dsn = admin_dsn
@@ -270,8 +274,11 @@ class Lab:
 
     # Query plans
 
-    def pattern(self, name: str, mode: str) -> dict[str, Any]:
-        """Run a transaction-pattern experiment (fixed SQL only) as this lab's role."""
+    def pattern(
+        self, name: str, mode: str, slots: threading.BoundedSemaphore | None = None
+    ) -> dict[str, Any]:
+        """Run a transaction-pattern experiment (fixed SQL only) as this lab's role. `slots`
+        caps experiments across all labs; one is taken only after this lab's own check."""
 
         def connect() -> psycopg.Connection[Any]:
             return psycopg.connect(
@@ -282,7 +289,13 @@ class Lab:
         if not self.pattern_lock.acquire(blocking=False):
             raise RuntimeError("An experiment is already running in your lab.")
         try:
-            return patterns.run(name, mode, connect)
+            if slots is not None and not slots.acquire(blocking=False):
+                raise ServerBusy("The server is busy with experiments; try again.")
+            try:
+                return patterns.run(name, mode, connect)
+            finally:
+                if slots is not None:
+                    slots.release()
         finally:
             self.pattern_lock.release()
 

@@ -20,7 +20,7 @@ from schemalab.config import get_settings
 from schemalab.lab import patterns
 from schemalab.lab.guard import LabSQLError
 from schemalab.lab.scenarios import BY_ID, SCENARIOS
-from schemalab.lab.session import Lab
+from schemalab.lab.session import Lab, ServerBusy
 
 router = APIRouter(prefix="/lab", tags=["lab"])
 
@@ -158,21 +158,26 @@ def pattern(user: UserDep, body: PatternRequest) -> dict[str, Any]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Choose an experiment and a way to run it."
         )
-    if not _pattern_slots.acquire(blocking=False):
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, "The server is busy with experiments; try again."
-        )
+    lab = _lab(user)
     try:
-        return _lab(user).pattern(body.id, body.mode)
+        return lab.pattern(body.id, body.mode, slots=_pattern_slots)
+    except ServerBusy as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from None
     except RuntimeError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None  # our own messages
     except psycopg.Error as e:
-        # Only PostgreSQL's own one-line message; connection errors can name hosts and users.
-        logger.warning("pattern %s/%s stopped: %s", body.id, body.mode, e)
-        detail = getattr(e.diag, "message_primary", None) or "The experiment could not finish."
+        # Only PostgreSQL's own one-line message, in the reply and the log: connection
+        # errors can name hosts and users.
+        primary = getattr(e.diag, "message_primary", None)
+        logger.warning(
+            "pattern %s/%s stopped: %s (%s)",
+            body.id,
+            body.mode,
+            primary or type(e).__name__,
+            e.sqlstate,
+        )
+        detail = primary or "The experiment could not finish."
         raise HTTPException(status.HTTP_409_CONFLICT, f"The experiment stopped: {detail}") from None
-    finally:
-        _pattern_slots.release()
 
 
 @router.get("/result")

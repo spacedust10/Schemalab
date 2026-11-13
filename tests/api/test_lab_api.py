@@ -150,28 +150,62 @@ def test_a_pattern_runs_in_the_users_lab(lab_client: TestClient) -> None:
     assert got["summary"].startswith("Every check passed")
 
 
+@needs_postgres
 def test_experiments_are_refused_when_the_server_is_busy(
     lab_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import threading
 
+    headers = register(lab_client)
+    lab_client.post("/lab/start", headers=headers)
     monkeypatch.setattr(lab_api, "_pattern_slots", threading.BoundedSemaphore(1))
     lab_api._pattern_slots.acquire()  # every slot taken by other users
     resp = lab_client.post(
-        "/lab/pattern", json={"id": "transfer", "mode": "atomic"}, headers=register(lab_client)
+        "/lab/pattern", json={"id": "transfer", "mode": "atomic"}, headers=headers
     )
     assert resp.status_code == 503 and "busy" in resp.json()["detail"]
 
 
 @needs_postgres
-def test_a_failed_experiment_does_not_echo_connection_details(
+def test_a_refused_second_run_does_not_take_a_server_slot(
     lab_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from schemalab.lab import patterns
+
+    running, release = threading.Event(), threading.Event()
+
+    def slow(name: str, mode: str, connect: Any) -> dict[str, Any]:
+        running.set()
+        release.wait(timeout=30)
+        return {"name": name, "checks": []}
+
+    monkeypatch.setattr(patterns, "run", slow)
+    monkeypatch.setattr(lab_api, "_pattern_slots", threading.BoundedSemaphore(1))
+    headers = register(lab_client)
+    lab_client.post("/lab/start", headers=headers)
+    body = {"id": "transfer", "mode": "atomic"}
+    first = threading.Thread(
+        target=lambda: lab_client.post("/lab/pattern", json=body, headers=headers)
+    )
+    first.start()
+    assert running.wait(timeout=10)
+    resp = lab_client.post("/lab/pattern", json=body, headers=headers)
+    release.set()
+    first.join(timeout=30)
+    assert resp.status_code == 409 and "already running" in resp.json()["detail"]
+
+
+@needs_postgres
+def test_a_failed_experiment_does_not_echo_connection_details(
+    lab_client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     import psycopg
 
     from schemalab.lab.session import Lab
 
-    def broken(self: Lab, name: str, mode: str) -> dict[str, Any]:
+    def broken(self: Lab, name: str, mode: str, slots: Any = None) -> dict[str, Any]:
         raise psycopg.OperationalError(
             'connection to server at "10.0.0.5", port 5432 failed: password authentication '
             'failed for user "lab_u1"'
@@ -185,3 +219,4 @@ def test_a_failed_experiment_does_not_echo_connection_details(
     )
     assert resp.status_code == 409
     assert "10.0.0.5" not in resp.text and "password" not in resp.text
+    assert "10.0.0.5" not in caplog.text and "password" not in caplog.text  # nor in the logs
