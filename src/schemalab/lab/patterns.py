@@ -201,9 +201,71 @@ def _pay(c: psycopg.Connection[Any], mode: str, key: str) -> int:
         return 0
 
 
+# Optimistic locking
+
+EDITS = 5  # per editor
+
+
+def optimistic(mode: str, connect: Connect) -> Result:
+    """Three editors each add 1 to a product's stock five times. They read, think without
+    holding a lock, then write: the way a web form edits a row."""
+    with connect() as c:
+        c.execute("DROP TABLE IF EXISTS demo_products")
+        c.execute(
+            "CREATE TABLE demo_products (id int PRIMARY KEY, stock int NOT NULL, "
+            "version int NOT NULL DEFAULT 1)"
+        )
+        c.execute("INSERT INTO demo_products (id, stock) VALUES (1, 100)")
+    counts = {"edits": 0, "conflicts": 0}
+    lock = threading.Lock()
+
+    def worker(w: int) -> None:
+        with connect() as c:
+            for _ in range(EDITS):
+                while True:
+                    row = c.execute(
+                        "SELECT stock, version FROM demo_products WHERE id = 1"
+                    ).fetchone()
+                    stock, version = row if row else (0, 0)
+                    time.sleep(RACE_PAUSE)  # the editor looks at the form
+                    if mode == "version":
+                        saved = c.execute(
+                            "UPDATE demo_products SET stock = %s, version = version + 1 "
+                            "WHERE id = 1 AND version = %s",
+                            [stock + 1, version],
+                        ).rowcount
+                    else:
+                        saved = c.execute(
+                            "UPDATE demo_products SET stock = %s WHERE id = 1", [stock + 1]
+                        ).rowcount
+                    with lock:
+                        if saved:
+                            counts["edits"] += 1
+                        else:
+                            counts["conflicts"] += 1  # someone saved first: read again
+                    if saved:
+                        break
+
+    started = time.perf_counter()
+    _together(worker)
+    with connect() as c:
+        row = c.execute("SELECT stock FROM demo_products WHERE id = 1").fetchone()
+    final = row[0] if row else 0
+    expected = 100 + WORKERS * EDITS
+    return {
+        "checks": [
+            _check("Stock after every edit", expected, final),
+            _check("Edits lost", 0, expected - final),
+        ],
+        "stats": counts,
+        "ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
 EXPERIMENTS: dict[str, tuple[Callable[[str, Connect], Result], tuple[str, ...]]] = {
     "transfer": (transfer, ("naive", "for_update", "atomic")),
     "idempotency": (idempotency, ("no_key", "check_first", "key")),
+    "optimistic": (optimistic, ("last_write_wins", "version")),
 }
 
 

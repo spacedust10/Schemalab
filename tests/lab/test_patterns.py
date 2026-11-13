@@ -58,3 +58,15 @@ def test_an_idempotency_key_charges_each_payment_once(lab: Lab) -> None:
     got = lab.pattern("idempotency", "key")
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert got["stats"]["requests"] == 30 and got["stats"]["replayed"] == 20
+
+
+def test_last_write_wins_loses_edits(lab: Lab) -> None:
+    got = lab.pattern("optimistic", "last_write_wins")
+    assert check(got, "Edits lost")["actual"] > 0
+
+
+def test_a_version_column_detects_conflicts_and_keeps_every_edit(lab: Lab) -> None:
+    got = lab.pattern("optimistic", "version")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]
+    assert check(got, "Stock after every edit")["actual"] == 115
+    assert got["stats"]["conflicts"] > 0  # detected, then retried
