@@ -148,3 +148,40 @@ def test_a_pattern_runs_in_the_users_lab(lab_client: TestClient) -> None:
     ).json()
     assert got["name"] == "idempotency" and all(c["ok"] for c in got["checks"])
     assert got["summary"].startswith("Every check passed")
+
+
+def test_experiments_are_refused_when_the_server_is_busy(
+    lab_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    monkeypatch.setattr(lab_api, "_pattern_slots", threading.BoundedSemaphore(1))
+    lab_api._pattern_slots.acquire()  # every slot taken by other users
+    resp = lab_client.post(
+        "/lab/pattern", json={"id": "transfer", "mode": "atomic"}, headers=register(lab_client)
+    )
+    assert resp.status_code == 503 and "busy" in resp.json()["detail"]
+
+
+@needs_postgres
+def test_a_failed_experiment_does_not_echo_connection_details(
+    lab_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import psycopg
+
+    from schemalab.lab.session import Lab
+
+    def broken(self: Lab, name: str, mode: str) -> dict[str, Any]:
+        raise psycopg.OperationalError(
+            'connection to server at "10.0.0.5", port 5432 failed: password authentication '
+            'failed for user "lab_u1"'
+        )
+
+    headers = register(lab_client)
+    lab_client.post("/lab/start", headers=headers)
+    monkeypatch.setattr(Lab, "pattern", broken)
+    resp = lab_client.post(
+        "/lab/pattern", json={"id": "transfer", "mode": "atomic"}, headers=headers
+    )
+    assert resp.status_code == 409
+    assert "10.0.0.5" not in resp.text and "password" not in resp.text

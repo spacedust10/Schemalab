@@ -4,6 +4,7 @@ Labs live in this process: one per user, at most MAX_LABS at a time, closed afte
 without use. Each holds two PostgreSQL connections in the sandbox database.
 """
 
+import logging
 import threading
 import time
 from dataclasses import asdict
@@ -28,6 +29,9 @@ IDLE_S = 20 * 60
 Session = Literal["A", "B"]
 
 _labs: dict[int, Lab] = {}
+# Experiments open several connections each; this many may run at once across all users.
+_pattern_slots = threading.BoundedSemaphore(4)
+logger = logging.getLogger(__name__)
 _labs_lock = threading.Lock()
 
 
@@ -154,13 +158,21 @@ def pattern(user: UserDep, body: PatternRequest) -> dict[str, Any]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Choose an experiment and a way to run it."
         )
-    lab = _lab(user)
-    try:
-        return lab.pattern(body.id, body.mode)
-    except (psycopg.Error, RuntimeError) as e:
+    if not _pattern_slots.acquire(blocking=False):
         raise HTTPException(
-            status.HTTP_409_CONFLICT, f"The experiment stopped: {str(e).splitlines()[0]}"
-        ) from None
+            status.HTTP_503_SERVICE_UNAVAILABLE, "The server is busy with experiments; try again."
+        )
+    try:
+        return _lab(user).pattern(body.id, body.mode)
+    except RuntimeError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None  # our own messages
+    except psycopg.Error as e:
+        # Only PostgreSQL's own one-line message; connection errors can name hosts and users.
+        logger.warning("pattern %s/%s stopped: %s", body.id, body.mode, e)
+        detail = getattr(e.diag, "message_primary", None) or "The experiment could not finish."
+        raise HTTPException(status.HTTP_409_CONFLICT, f"The experiment stopped: {detail}") from None
+    finally:
+        _pattern_slots.release()
 
 
 @router.get("/result")

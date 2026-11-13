@@ -278,8 +278,13 @@ class Lab:
                 self.admin_dsn, user=self.role, password=self.password, autocommit=True
             )
 
-        with self.pattern_lock:
+        # Refuse rather than queue: a queued run would hold a server thread while it waits.
+        if not self.pattern_lock.acquire(blocking=False):
+            raise RuntimeError("An experiment is already running in your lab.")
+        try:
             return patterns.run(name, mode, connect)
+        finally:
+            self.pattern_lock.release()
 
     def explain(self, statement: str) -> dict[str, Any]:
         """EXPLAIN ANALYZE a query and advise on indexes. EXPLAIN ANALYZE runs the query, so it
