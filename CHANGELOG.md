@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Transaction patterns: five experiments run real concurrent PostgreSQL connections in your lab, the naive way beside the safe one, with checks an outsider would notice. Ledger transfers (read-then-write creates or destroys money; FOR UPDATE in id order and UPDATE in place do not), idempotency keys (a retried payment charges once), optimistic locking with a version column (no lost edits), the transactional outbox with FOR UPDATE SKIP LOCKED relays (no lost or doubled events), and TPC-C New-Order (unique order numbers, exact stock).
 - Tested Days 1-14 against real files and hostile inputs, and fixed what broke:
   - Ask: a model reply with an unclosed quote no longer ends the answer with nothing; parse errors read as plain text; a question over empty tables is answered once, saying they are empty.
   - SQL guard: table functions behind LATERAL are refused.
