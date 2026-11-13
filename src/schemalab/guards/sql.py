@@ -45,8 +45,10 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
     try:
         parsed = sqlglot.parse(sql, read="duckdb")
     except sqlglot.errors.SqlglotError as e:  # ParseError, and TokenError for an unclosed quote
-        # sqlglot underlines the bad token with terminal escape codes; keep the plain text.
+        # sqlglot underlines the bad token with terminal escape codes, and the message quotes
+        # the model's SQL: drop escape sequences, then every other control character.
         plain = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
+        plain = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "", plain)
         raise UnsafeSQLError(f"could not parse SQL: {plain}") from e
     # A trailing comment after the last ';' parses as a bare Semicolon node.
     statements = [s for s in parsed if s is not None and not isinstance(s, exp.Semicolon)]

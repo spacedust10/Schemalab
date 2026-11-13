@@ -194,3 +194,11 @@ def test_parse_errors_read_as_plain_text() -> None:
     with pytest.raises(UnsafeSQLError) as e:
         check_sql("System prompt: `sql>`", {"orders"})
     assert "\x1b" not in str(e.value) and "could not parse SQL" in str(e.value)
+
+
+def test_control_characters_from_the_sql_never_reach_the_message() -> None:
+    # The message quotes the model's SQL; a terminal title sequence must not survive.
+    with pytest.raises(UnsafeSQLError) as e:
+        check_sql("SELECT \x1b]0;owned\x07 FROM \x00orders WHERE", {"orders"})
+    assert not any(ord(c) < 32 and c not in "\n\t" for c in str(e.value))
+    assert "\x7f" not in str(e.value)
