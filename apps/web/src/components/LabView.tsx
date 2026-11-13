@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type Entry, type LabState, type Outcome, type Scenario, expectation, record, settle, xmaxLabel } from "@/lib/lab";
+import { type Entry, type LabState, type Outcome, type Scenario, expectation, record, settle, unfinished, xmaxLabel } from "@/lib/lab";
 import { errorText, postJSON } from "@/lib/post";
 import { ResultTable } from "./ResultTable";
 
@@ -88,7 +88,7 @@ export function LabView() {
       const res = await fetch(`/api/lab/result?session=${session}`);
       if (!res.ok) break;
       const outcome = (await res.json()) as Outcome;
-      if (outcome.state !== "waiting") {
+      if (!unfinished(outcome)) {
         if (outcome.state !== "idle") setHistory((h) => ({ ...h, [session]: settle(h[session], outcome) }));
         break;
       }
@@ -104,7 +104,7 @@ export function LabView() {
       ? ((await res.json()) as Outcome)
       : { state: "error", error: await errorText(res, "The statement was refused.") };
     setHistory((h) => ({ ...h, [session]: record(h[session], sql, outcome) }));
-    if (outcome.state === "waiting") {
+    if (unfinished(outcome)) {
       setWaiting((w) => ({ ...w, [session]: true }));
       void refresh();
       void watch(session);
@@ -276,6 +276,7 @@ function Console(props: {
 
 function Result({ outcome, waited }: { outcome: Outcome; waited?: boolean }) {
   if (outcome.state === "waiting") return <p className="lab-out tone-medium">Waiting for a lock held by the other session…</p>;
+  if (outcome.state === "running") return <p className="lab-out tone-medium">Still running. Nothing blocks it; it is just slow (the lab stops statements after 30 seconds).</p>;
   if (outcome.state === "error") {
     return (
       <p className="lab-out tone-low">

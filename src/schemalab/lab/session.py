@@ -176,14 +176,16 @@ class Lab:
         with self.lock:
             earlier = self.pending.get(session)
             if earlier is not None and not earlier.done():
-                raise RuntimeError(f"Session {session} is still waiting for a lock.")
+                if self._blocked(session):
+                    raise RuntimeError(f"Session {session} is still waiting for a lock.")
+                raise RuntimeError(f"Session {session} is still running its last statement.")
             future = self.pools[session].submit(self._execute, session, text)
             self.pending[session] = future
             self.last_used = time.monotonic()
         try:
             outcome = future.result(timeout=wait_s)
         except TimeoutError:
-            return {"state": "waiting", "statement": text, "transaction": "waiting"}
+            return {**self._unfinished(session), "statement": text}
         with self.lock:
             if self.pending.get(session) is future:
                 del self.pending[session]
@@ -196,9 +198,25 @@ class Lab:
             if future is None:
                 return None
             if not future.done():
-                return {"state": "waiting", "transaction": "waiting"}
+                return self._unfinished(session)
             del self.pending[session]
         return future.result()
+
+    def _blocked(self, session: str) -> bool:
+        """Whether the session's statement waits for a lock, not merely takes a while."""
+        pid = self.conns[session].info.backend_pid
+        with self.admin_lock:
+            row = (
+                self._admin()
+                .execute("SELECT wait_event_type FROM pg_stat_activity WHERE pid = %s", [pid])
+                .fetchone()
+            )
+        return bool(row and row[0] == "Lock")
+
+    def _unfinished(self, session: str) -> Outcome:
+        if self._blocked(session):
+            return {"state": "waiting", "transaction": "waiting"}
+        return {"state": "running", "transaction": "running"}
 
     def _execute(self, session: str, statement: str) -> Outcome:
         conn = self.conns[session]

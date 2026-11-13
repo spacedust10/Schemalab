@@ -21,7 +21,7 @@ def finish(lab: Lab, session: str) -> dict[str, Any]:
     end = time.monotonic() + 5
     while time.monotonic() < end:
         outcome = lab.result(session)
-        if outcome is None or outcome["state"] != "waiting":
+        if outcome is None or outcome["state"] not in ("waiting", "running"):
             return outcome or {}
         time.sleep(0.05)
     raise AssertionError(f"{session} never finished")
@@ -39,13 +39,13 @@ def play(lab: Lab, scenario: Scenario) -> list[dict[str, Any]]:
             seen[j] = {**seen[j], "finished": finish(lab, step.session)}
         outcome = lab.run(step.session, step.sql, wait_s=1.5)
         seen.append({"outcome": outcome})
-        if outcome["state"] == "waiting":
+        if outcome["state"] in ("waiting", "running"):
             waiting[step.session] = i
         # Whatever was waiting may have been released by this step.
         for other, j in list(waiting.items()):
             if other != step.session:
                 result = lab.result(other)
-                if result and result["state"] != "waiting":
+                if result and result["state"] not in ("waiting", "running"):
                     seen[j] = {**seen[j], "finished": result}
                     waiting.pop(other)
     for other, j in waiting.items():

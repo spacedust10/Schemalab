@@ -2,7 +2,8 @@
 import type { Cell } from "./chart";
 
 export type Outcome = {
-  state: "done" | "waiting" | "error" | "idle";
+  // waiting: blocked by a lock; running: still executing, nothing blocks it.
+  state: "done" | "waiting" | "running" | "error" | "idle";
   status?: string;
   columns?: string[];
   rows?: Cell[][];
@@ -26,12 +27,16 @@ export function record(history: Entry[], sql: string, outcome: Outcome): Entry[]
   return [...history, { sql, outcome }];
 }
 
-/** A statement that was waiting has finished: replace its entry with the final outcome. */
+export function unfinished(outcome: Outcome): boolean {
+  return outcome.state === "waiting" || outcome.state === "running";
+}
+
+/** A statement that was waiting or running has finished: replace its entry with the outcome. */
 export function settle(history: Entry[], outcome: Outcome): Entry[] {
-  const i = history.findLastIndex((e) => e.outcome.state === "waiting");
+  const i = history.findLastIndex((e) => unfinished(e.outcome));
   if (i < 0) return history;
   const next = [...history];
-  next[i] = { ...next[i], outcome, waited: true };
+  next[i] = { ...next[i], outcome, waited: history[i].outcome.state === "waiting" };
   return next;
 }
 

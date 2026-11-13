@@ -62,7 +62,7 @@ def test_two_sessions_wait_and_finish(lab_client: TestClient) -> None:
     run(lab_client, headers, "A", "COMMIT")
     for _ in range(50):
         got = lab_client.get("/lab/result", params={"session": "B"}, headers=headers).json()
-        if got["state"] != "waiting":
+        if got["state"] not in ("waiting", "running"):
             break
         time.sleep(0.05)
     assert got["status"] == "UPDATE 1"

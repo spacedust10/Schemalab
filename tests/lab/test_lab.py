@@ -25,7 +25,7 @@ def until_done(lab: Lab, session: str, seconds: float = 5.0) -> dict[str, object
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         outcome = lab.result(session)
-        if outcome and outcome["state"] != "waiting":
+        if outcome and outcome["state"] not in ("waiting", "running"):
             return outcome
         time.sleep(0.05)
     raise AssertionError(f"session {session} still waiting")
@@ -179,3 +179,26 @@ def test_explain_never_changes_data(lab: Lab) -> None:
 def test_explain_takes_queries_only(lab: Lab) -> None:
     with pytest.raises(LabSQLError, match="Explain a SELECT"):
         lab.explain("UPDATE orders SET status = 'x'")
+
+
+def test_a_slow_statement_is_running_not_waiting_for_a_lock(lab: Lab) -> None:
+    out = lab.run("A", "SELECT pg_sleep(2.5)", wait_s=0.5)
+    # Nothing holds a lock it needs: it is simply still running.
+    assert out["state"] == "running"
+    assert lab.state()["sessions"]["A"]["transaction"] != "waiting for a lock"
+    with pytest.raises(RuntimeError, match="still running"):
+        lab.run("A", "SELECT 1")
+    end = time.monotonic() + 5
+    while (result := lab.result("A")) and result["state"] == "running" and time.monotonic() < end:
+        time.sleep(0.05)
+    assert result and result["state"] == "done"
+
+
+def test_a_blocked_statement_is_still_reported_as_waiting(lab: Lab) -> None:
+    setup(lab)
+    lab.run("A", "BEGIN")
+    lab.run("A", "UPDATE accounts SET balance = 0 WHERE id = 1")
+    out = lab.run("B", "UPDATE accounts SET balance = 1 WHERE id = 1", wait_s=0.5)
+    assert out["state"] == "waiting"
+    lab.run("A", "COMMIT")
+    until_done(lab, "B")

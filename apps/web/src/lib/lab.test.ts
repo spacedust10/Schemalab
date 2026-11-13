@@ -26,6 +26,20 @@ describe("console history", () => {
   });
 });
 
+describe("slow statements", () => {
+  it("replaces a running entry without calling it a lock wait", () => {
+    let h: Entry[] = record([], "SELECT pg_sleep(5)", { state: "running", transaction: "running" });
+    h = settle(h, { state: "done", status: "SELECT 1", transaction: "idle" });
+    expect(h[0].outcome.state).toBe("done");
+    expect(h[0].waited).toBe(false);
+  });
+
+  it("treats running and waiting as unfinished, and nothing else", async () => {
+    const { unfinished } = await import("./lab");
+    expect(["waiting", "running", "done", "error", "idle"].map((state) => unfinished({ state } as never))).toEqual([true, true, false, false, false]);
+  });
+});
+
 describe("lab routes", () => {
   afterEach(() => vi.unstubAllGlobals());
   const headers = { cookie: `${SESSION_COOKIE}=tok`, "content-type": "application/json", origin: "http://localhost:3000" };
