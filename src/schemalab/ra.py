@@ -117,6 +117,18 @@ def _tokens(text: str) -> list[_Token]:
 MAX_DEPTH = 50  # deeper trees overflow the SQL generator's recursion
 
 
+def _check_depth(node: Node) -> Node:
+    """Refuses a tree deeper than MAX_DEPTH, measured without recursion, so every later walk
+    over it (SQL, drawing, the table check) stays within Python's recursion limit."""
+    stack = [(node, 1)]
+    while stack:
+        n, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            raise RAError(f"The expression is nested too deeply (at most {MAX_DEPTH} levels).")
+        stack.extend((c, depth + 1) for c in n.children)
+    return node
+
+
 @_bounded
 def parse_ra(text: str) -> Node:
     if not text.strip():
@@ -136,7 +148,7 @@ def parse_ra(text: str) -> Node:
     leftover = parser.peek()
     if leftover.kind != "end":
         raise RAError(f"unexpected {leftover.text} at position {leftover.pos}")
-    return node
+    return _check_depth(node)
 
 
 class _Parser:
@@ -370,7 +382,7 @@ def from_sql(sql: str) -> Translation:
     if len(statements) != 1:
         raise RAError("Give exactly one query.")
     notes: list[str] = []
-    return Translation(_query(cast(exp.Expression, statements[0]), notes), notes)
+    return Translation(_check_depth(_query(cast(exp.Expression, statements[0]), notes)), notes)
 
 
 def _query(q: exp.Expression, notes: list[str]) -> Node:

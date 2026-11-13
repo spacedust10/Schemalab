@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import register
@@ -67,3 +68,15 @@ def test_constraints_for_a_sample_table(client: TestClient) -> None:
 def test_constraints_for_an_unknown_table(client: TestClient) -> None:
     resp = client.get("/constraints", params={"table": "nope"}, headers=register(client))
     assert resp.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"expression": " ∪ ".join(["orders"] * 450)},  # inside the 5,000-character limit
+        {"sql": "SELECT * FROM orders" + " UNION SELECT * FROM orders" * 600},
+    ],
+)
+def test_too_deep_trees_are_a_400_not_a_crash(client: TestClient, body: dict[str, str]) -> None:
+    resp = client.post("/algebra", json=body, headers=register(client))
+    assert resp.status_code == 400 and "nested too deeply" in resp.json()["detail"]
