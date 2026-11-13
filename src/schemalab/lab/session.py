@@ -2,7 +2,7 @@
 
 Security model, in layers:
 - The lab database is its own Postgres server with nothing in it but lab schemas.
-- Each user gets a role lab_u<id> (no superuser, no CREATEDB/CREATEROLE, at most 4
+- Each user gets a role lab_u<id> (no superuser, no CREATEDB/CREATEROLE, at most 8
   connections) that owns only schema lab_u<id>. CONNECT and the public schema are revoked from
   PUBLIC, so one user cannot read another's tables.
 - The role's statement_timeout and idle_in_transaction_session_timeout are fixed on the role;
@@ -26,6 +26,7 @@ from psycopg import sql
 from psycopg.pq import TransactionStatus
 
 from schemalab.agent.graph import json_value
+from schemalab.lab import patterns
 from schemalab.lab.guard import LabSQLError, check_lab_sql
 from schemalab.plans import advise, summarize
 
@@ -101,9 +102,11 @@ class Lab:
                 a.execute(
                     sql.SQL(
                         "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
-                        "NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 4 PASSWORD {}"
+                        "NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 8 PASSWORD {}"
                     ).format(role, sql.Literal(self.password))
                 )
+            # Two sessions, the planner, and the pattern experiments' worker connections.
+            a.execute(sql.SQL("ALTER ROLE {} CONNECTION LIMIT 8").format(role))
             for setting, value in (
                 ("statement_timeout", STATEMENT_TIMEOUT),
                 ("idle_in_transaction_session_timeout", IDLE_TIMEOUT),
@@ -265,6 +268,16 @@ class Lab:
         return _TRANSACTION.get(conn.info.transaction_status, "unknown")
 
     # Query plans
+
+    def pattern(self, name: str, mode: str) -> dict[str, Any]:
+        """Run a transaction-pattern experiment (fixed SQL only) as this lab's role."""
+
+        def connect() -> psycopg.Connection[Any]:
+            return psycopg.connect(
+                self.admin_dsn, user=self.role, password=self.password, autocommit=True
+            )
+
+        return patterns.run(name, mode, connect)
 
     def explain(self, statement: str) -> dict[str, Any]:
         """EXPLAIN ANALYZE a query and advise on indexes. EXPLAIN ANALYZE runs the query, so it
