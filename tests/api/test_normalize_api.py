@@ -64,3 +64,12 @@ def test_cover_is_shown_merged_by_left_side_in_schema_order(client: TestClient) 
     body = {"schema": "E(sid, name, major, course)", "dependencies": "sid -> major, name"}
     got = analyze(client, body).json()
     assert got["cover"] == [{"lhs": ["sid"], "rhs": ["name", "major"]}]
+
+
+def test_a_case_too_costly_to_decompose_is_a_400(client: TestClient) -> None:
+    names = ", ".join(f"A{i}" for i in range(16))
+    deps = "\n".join(f"A{i}, A{(i + 5) % 16} -> A{(i + 9) % 16}" for i in range(16))
+    resp = client.post(
+        "/normalize", json={"schema": f"R({names})", "dependencies": deps}, headers=register(client)
+    )
+    assert resp.status_code == 400 and "too many" in resp.json()["detail"]

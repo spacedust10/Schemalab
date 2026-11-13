@@ -261,3 +261,13 @@ def test_the_slowest_known_case_answers_or_refuses_within_seconds() -> None:
     except NormalizeError as e:
         assert "too many" in str(e)
     assert time.perf_counter() - start < 5
+
+
+def test_one_budget_covers_every_projection_in_a_request() -> None:
+    from schemalab.normalize import budget
+
+    names = [f"A{i}" for i in range(16)]
+    attrs, fds = parse(f"R({','.join(names)})", "\n".join(f"A{i} -> A{i + 1}" for i in range(15)))
+    bcnf_decompose(attrs, fds)  # fine on its own
+    with budget(50), pytest.raises(NormalizeError, match="too many"):
+        bcnf_decompose(attrs, fds)  # each projection is small; together they pass 50

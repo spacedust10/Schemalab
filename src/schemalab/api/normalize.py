@@ -53,9 +53,15 @@ def analyze(user: UserDep, body: NormalizeRequest) -> dict[str, Any]:
             "lost": [dep(f) for f in d.lost],
         }
 
-    cover = nf.minimal_cover(fds)
-    keys = nf.candidate_keys(attrs, cover)
-    report = nf.normal_form(attrs, fds)
+    try:
+        with nf.budget():  # one limit for the whole request
+            cover = nf.minimal_cover(fds)
+            keys = nf.candidate_keys(attrs, cover)
+            report = nf.normal_form(attrs, fds)
+            bcnf = nf.bcnf_decompose(attrs, fds)
+            third = nf.synthesize_3nf(attrs, fds)
+    except nf.NormalizeError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
     result: dict[str, Any] = {
         "attributes": attrs,
         "dependencies": [dep(f) for f in fds],
@@ -66,8 +72,8 @@ def analyze(user: UserDep, body: NormalizeRequest) -> dict[str, Any]:
         "violations": [
             {"form": v.form, **dep(v.fd), "reason": v.reason} for v in report.violations
         ],
-        "bcnf": decomposition(nf.bcnf_decompose(attrs, fds)),
-        "third": decomposition(nf.synthesize_3nf(attrs, fds)),
+        "bcnf": decomposition(bcnf),
+        "third": decomposition(third),
     }
     if wanted is not None:
         plus = nf.closure(wanted, fds)

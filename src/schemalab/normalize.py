@@ -10,6 +10,9 @@ at MAX_ATTRIBUTES; that is plenty for teaching and for one table at a time.
 """
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Literal
@@ -255,6 +258,23 @@ def normal_form(attrs: list[str], fds: list[FD]) -> Report:
 # Work bounds for projecting dependencies, which is exponential in the worst case.
 MAX_SUBSETS = 70_000  # every subset of 16 attributes fits
 MAX_FOUND = 2_000
+MAX_REQUEST_SUBSETS = 200_000  # across every projection one request makes
+
+_budget: ContextVar[list[int] | None] = ContextVar("normalize_budget", default=None)
+_TOO_MANY = (
+    "These dependencies have too many combinations to decompose here; "
+    "try fewer attributes or dependencies."
+)
+
+
+@contextmanager
+def budget(subsets: int = MAX_REQUEST_SUBSETS) -> Iterator[None]:
+    """One limit on the closures computed by everything inside, however many projections."""
+    token = _budget.set([subsets])
+    try:
+        yield
+    finally:
+        _budget.reset(token)
 
 
 def project(fds: list[FD], attrs: list[str]) -> list[FD]:
@@ -266,11 +286,11 @@ def project(fds: list[FD], attrs: list[str]) -> list[FD]:
 
     def plus(x: Attrs) -> Attrs:
         if x not in seen:
-            if len(seen) >= MAX_SUBSETS:
-                raise NormalizeError(
-                    "These dependencies have too many combinations to decompose here; "
-                    "try fewer attributes or dependencies."
-                )
+            shared = _budget.get()
+            if shared is not None:
+                shared[0] -= 1
+            if len(seen) >= MAX_SUBSETS or (shared is not None and shared[0] < 0):
+                raise NormalizeError(_TOO_MANY)
             seen[x] = closure(x, fds)
         return seen[x]
 
@@ -286,10 +306,7 @@ def project(fds: list[FD], attrs: list[str]) -> list[FD]:
             if y:
                 found.append(FD(x, y))
     if len(found) > MAX_FOUND:
-        raise NormalizeError(
-            "These dependencies have too many combinations to decompose here; "
-            "try fewer attributes or dependencies."
-        )
+        raise NormalizeError(_TOO_MANY)
     return minimal_cover(found)
 
 
