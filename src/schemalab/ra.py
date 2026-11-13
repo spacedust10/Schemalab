@@ -14,10 +14,12 @@ semantics (SELECT DISTINCT), as in the algebra. Joins and selections over plain 
 become one SELECT; anything else nests as a subquery, one per operator.
 """
 
+import functools
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import count
-from typing import cast
+from typing import Any, cast
 
 import sqlglot
 from sqlglot import exp
@@ -26,6 +28,22 @@ from sqlglot.errors import SqlglotError
 
 class RAError(ValueError):
     """The expression or query cannot be translated. The message says where and why."""
+
+
+def _bounded[F: Callable[..., Any]](fn: F) -> F:
+    """Any tree too deep to walk (a long chain of operators, deep parentheses in a condition,
+    deeply nested SQL) is refused like a deeply nested expression, not left to crash."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except RecursionError:
+            raise RAError(
+                f"The expression is nested too deeply (at most {MAX_DEPTH} levels)."
+            ) from None
+
+    return cast(F, wrapper)
 
 
 @dataclass(frozen=True)
@@ -99,6 +117,7 @@ def _tokens(text: str) -> list[_Token]:
 MAX_DEPTH = 50  # deeper trees overflow the SQL generator's recursion
 
 
+@_bounded
 def parse_ra(text: str) -> Node:
     if not text.strip():
         raise RAError("Write a relational algebra expression, like π[name](student).")
@@ -259,6 +278,7 @@ class _Frame:
         return " ".join(parts)
 
 
+@_bounded
 def to_sql(node: Node) -> str:
     names = count(1)
 
@@ -341,6 +361,7 @@ class Translation:
     notes: list[str]
 
 
+@_bounded
 def from_sql(sql: str) -> Translation:
     try:
         statements = [s for s in sqlglot.parse(sql, read="duckdb") if s is not None]
@@ -448,6 +469,7 @@ _PRECEDENCE = {
 }
 
 
+@_bounded
 def to_ra(node: Node) -> str:
     if node.op == "relation":
         return str(node.arg)
@@ -467,6 +489,7 @@ def to_ra(node: Node) -> str:
     return f"{side(left, False)} {symbol} {side(right, True)}"
 
 
+@_bounded
 def tree(node: Node) -> dict[str, object]:
     label = (
         str(node.arg)

@@ -181,3 +181,15 @@ def test_deep_nesting_is_refused_with_a_message_not_a_crash() -> None:
 def test_ordinary_nesting_still_translates() -> None:
     nested = "σ[a > 1](" * 40 + "R" + ")" * 40
     assert to_sql(parse_ra(nested)).startswith("SELECT")
+
+
+@pytest.mark.parametrize(
+    "deep",
+    [
+        " ∪ ".join(["R"] * 700),  # left-deep tree without a single parenthesis
+        "σ[" + "(" * 900 + "a > 1" + ")" * 900 + "](R)",  # deep parentheses inside a condition
+    ],
+)
+def test_deep_trees_from_any_source_are_refused(deep: str) -> None:
+    with pytest.raises(RAError, match="nested too deeply"):
+        to_sql(parse_ra(deep))
