@@ -91,3 +91,16 @@ def test_relays_without_row_locks_publish_events_twice(lab: Lab) -> None:
 def test_an_outbox_with_skip_locked_relays_publishes_each_event_once(lab: Lab) -> None:
     got = lab.pattern("outbox", "outbox")
     assert all(c["ok"] for c in got["checks"]), got["checks"]
+
+
+def test_new_order_without_locks_repeats_order_numbers_and_miscounts_stock(lab: Lab) -> None:
+    got = lab.pattern("new_order", "naive")
+    assert check(got, "Orders that failed")["actual"] > 0  # a repeated order number
+    assert check(got, "Stock count off by")["actual"] != 0
+
+
+@pytest.mark.parametrize("mode", ["for_update", "atomic"])
+def test_new_order_with_locks_or_atomic_updates_places_every_order(lab: Lab, mode: str) -> None:
+    got = lab.pattern("new_order", mode)
+    assert all(c["ok"] for c in got["checks"]), got["checks"]
+    assert check(got, "Orders placed")["actual"] == 60

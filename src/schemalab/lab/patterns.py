@@ -7,6 +7,7 @@ vanish, did an event go missing, are order numbers unique. Only the fixed SQL be
 user picks an experiment and a mode, nothing else.
 """
 
+import random
 import threading
 import time
 from collections.abc import Callable
@@ -334,11 +335,139 @@ _PENDING = "SELECT id, order_id FROM demo_outbox WHERE NOT published ORDER BY id
 _PENDING_LOCKED = _PENDING + " FOR UPDATE SKIP LOCKED"
 
 
+# TPC-C New-Order
+
+ORDERS_PER_WORKER = 20
+DISTRICTS = 2
+ITEMS = 10
+FIRST_ORDER_ID = 3001  # TPC-C loads 3,000 orders per district first
+
+
+def new_order(mode: str, connect: Connect) -> Result:
+    """The heart of TPC-C's New-Order transaction, simplified: take the district's next order
+    number, insert the order, and for each of three items take stock and add an order line.
+    Rows are always touched in the same order (district, then items by id) to avoid
+    deadlocks."""
+    with connect() as c:
+        c.execute("DROP TABLE IF EXISTS demo_district, demo_stock, demo_order, demo_order_line")
+        c.execute(
+            "CREATE TABLE demo_district (d_w_id int, d_id int, d_next_o_id int NOT NULL, "
+            "PRIMARY KEY (d_w_id, d_id))"
+        )
+        c.execute("CREATE TABLE demo_stock (s_i_id int PRIMARY KEY, s_quantity int NOT NULL)")
+        c.execute(
+            "CREATE TABLE demo_order (o_w_id int, o_d_id int, o_id int, o_ol_cnt int NOT NULL, "
+            "PRIMARY KEY (o_w_id, o_d_id, o_id))"
+        )
+        c.execute(
+            "CREATE TABLE demo_order_line (ol_w_id int, ol_d_id int, ol_o_id int, "
+            "ol_number int, ol_i_id int NOT NULL, ol_quantity int NOT NULL, "
+            "PRIMARY KEY (ol_w_id, ol_d_id, ol_o_id, ol_number))"
+        )
+        c.execute(
+            "INSERT INTO demo_district SELECT 1, d, %s FROM generate_series(1, %s) d",
+            [FIRST_ORDER_ID, DISTRICTS],
+        )
+        c.execute("INSERT INTO demo_stock SELECT i, 1000 FROM generate_series(1, %s) i", [ITEMS])
+    counts = {"orders": 0, "failed": 0, "deadlocks": 0}
+    lock = threading.Lock()
+
+    def worker(w: int) -> None:
+        chooser = random.Random(w)  # noqa: S311  # the same demo orders every run, not secrets
+        with connect() as c:
+            for _ in range(ORDERS_PER_WORKER):
+                district = chooser.randint(1, DISTRICTS)
+                lines = sorted(
+                    (item, chooser.randint(1, 5)) for item in chooser.sample(range(1, ITEMS + 1), 3)
+                )
+                for _attempt in range(5):
+                    try:
+                        with c.transaction():
+                            _new_order(c, mode, district, lines)
+                        outcome = "orders"
+                    except psycopg.errors.DeadlockDetected:
+                        outcome = "deadlocks"
+                    except psycopg.errors.UniqueViolation:
+                        outcome = "failed"  # the order number was already taken
+                    with lock:
+                        counts[outcome] += 1
+                    if outcome != "deadlocks":
+                        break
+
+    started = time.perf_counter()
+    _together(worker)
+    with connect() as c:
+        placed, ordered, left, counters = c.execute(
+            "SELECT (SELECT count(*) FROM demo_order), "
+            "(SELECT coalesce(sum(ol_quantity), 0) FROM demo_order_line), "
+            "(SELECT sum(s_quantity) FROM demo_stock), "
+            "(SELECT sum(d_next_o_id - %s) FROM demo_district)",
+            [FIRST_ORDER_ID],
+        ).fetchone() or (0, 0, 0, 0)
+    taken = ITEMS * 1000 - int(left)
+    return {
+        "checks": [
+            _check("Orders placed", WORKERS * ORDERS_PER_WORKER, placed),
+            _check("Orders that failed", 0, counts["failed"]),
+            _check("Order numbers handed out", placed, int(counters)),
+            _check("Stock count off by", 0, taken - int(ordered)),
+        ],
+        "stats": counts,
+        "ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
+def _new_order(
+    c: psycopg.Connection[Any], mode: str, district: int, lines: list[tuple[int, int]]
+) -> None:
+    if mode == "atomic":
+        row = c.execute(
+            "UPDATE demo_district SET d_next_o_id = d_next_o_id + 1 "
+            "WHERE d_w_id = 1 AND d_id = %s RETURNING d_next_o_id - 1",
+            [district],
+        ).fetchone()
+        order_id = row[0] if row else 0
+    else:
+        read = _NEXT_ORDER_LOCKED if mode == "for_update" else _NEXT_ORDER
+        row = c.execute(read, [district]).fetchone()
+        order_id = row[0] if row else 0
+        time.sleep(RACE_PAUSE)
+        c.execute(
+            "UPDATE demo_district SET d_next_o_id = %s WHERE d_w_id = 1 AND d_id = %s",
+            [order_id + 1, district],
+        )
+    c.execute("INSERT INTO demo_order VALUES (1, %s, %s, %s)", [district, order_id, len(lines)])
+    for number, (item, quantity) in enumerate(lines, start=1):
+        if mode == "atomic":
+            c.execute(
+                "UPDATE demo_stock SET s_quantity = s_quantity - %s WHERE s_i_id = %s",
+                [quantity, item],
+            )
+        else:
+            read = _STOCK_LOCKED if mode == "for_update" else _STOCK
+            row = c.execute(read, [item]).fetchone()
+            c.execute(
+                "UPDATE demo_stock SET s_quantity = %s WHERE s_i_id = %s",
+                [(row[0] if row else 0) - quantity, item],
+            )
+        c.execute(
+            "INSERT INTO demo_order_line VALUES (1, %s, %s, %s, %s, %s)",
+            [district, order_id, number, item, quantity],
+        )
+
+
+_NEXT_ORDER = "SELECT d_next_o_id FROM demo_district WHERE d_w_id = 1 AND d_id = %s"
+_NEXT_ORDER_LOCKED = _NEXT_ORDER + " FOR UPDATE"
+_STOCK = "SELECT s_quantity FROM demo_stock WHERE s_i_id = %s"
+_STOCK_LOCKED = _STOCK + " FOR UPDATE"
+
+
 EXPERIMENTS: dict[str, tuple[Callable[[str, Connect], Result], tuple[str, ...]]] = {
     "transfer": (transfer, ("naive", "for_update", "atomic")),
     "idempotency": (idempotency, ("no_key", "check_first", "key")),
     "optimistic": (optimistic, ("last_write_wins", "version")),
     "outbox": (outbox, ("dual_write", "outbox_no_lock", "outbox")),
+    "new_order": (new_order, ("naive", "for_update", "atomic")),
 }
 
 
