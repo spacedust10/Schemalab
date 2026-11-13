@@ -278,9 +278,13 @@ def _card(symbol: str) -> Card:
 
 
 def _check_name(name: str, line: int) -> str:
-    if name.lower() in RESERVED:
-        raise ERError(f"line {line}: {name} is a reserved word in SQL; choose another name.")
-    return name
+    return name  # reserved words are fine: the DDL quotes them (see _sql_name)
+
+
+def _sql_name(name: str) -> str:
+    """A table name for the DDL, quoted when it is a reserved word such as user or order."""
+    table = snake(name)
+    return f'"{table}"' if table in RESERVED else table
 
 
 def _attributes(body: str, line: int, keys: bool = True) -> list[Attribute]:
@@ -414,7 +418,7 @@ def to_ddl(model: Model, dialect: str = "postgres") -> str:
         if name in seen:
             raise ERError(f"{name} depends on itself through weak entities or subtypes.")
         e = by_name[name]
-        t = _Table(snake(name))
+        t = _Table(_sql_name(name))
         borrowed: list[tuple[str, Attribute]] = []
         refs: list[tuple[list[str], str, list[str], str]] = []  # cols, table, ref cols, extra
         sp = supertype.get(name)
@@ -454,10 +458,10 @@ def to_ddl(model: Model, dialect: str = "postgres") -> str:
         t.constraints.append(f"PRIMARY KEY ({', '.join(c for c, _ in key_cols[name])})")
         for cols, target, ref, tail in refs:
             t.constraints.append(
-                f"FOREIGN KEY ({', '.join(cols)}) REFERENCES {snake(target)} "
+                f"FOREIGN KEY ({', '.join(cols)}) REFERENCES {_sql_name(target)} "
                 f"({', '.join(ref)}){tail}"
             )
-            t.depends.add(snake(target))
+            t.depends.add(_sql_name(target))
         tables[name] = t
 
     for e in model.entities:
@@ -499,7 +503,7 @@ def to_ddl(model: Model, dialect: str = "postgres") -> str:
             continue  # the weak entity's table already holds its owner's key
         left, right = by_name[r.left.entity], by_name[r.right.entity]
         if r.kind == "M:N":
-            j = _Table(snake(r.name))
+            j = _Table(_sql_name(r.name))
             cols = foreign_key(j, left, snake(left.name), True, False)
             cols += foreign_key(j, right, snake(right.name), True, False)
             j.constraints.insert(0, f"PRIMARY KEY ({', '.join(cols)})")
@@ -575,7 +579,18 @@ def read_any(text: str) -> tuple[Model, str]:
 
 
 def camel(name: str) -> str:
-    return "".join(part[:1].upper() + part[1:] for part in re.split(r"_+", name) if part)
+    """order_items or "Order Items" -> OrderItems: a name the design text can hold."""
+    out = "".join(part[:1].upper() + part[1:] for part in re.split(r"[^0-9A-Za-z]+", name) if part)
+    return out if out[:1].isalpha() else f"T{out}"
+
+
+def _attr_name(column: str) -> str:
+    """A column name as an attribute: unchanged when it is a plain name, else "Item Id" ->
+    item_id."""
+    if re.fullmatch(_NAME, column):
+        return column
+    out = re.sub(r"[^0-9a-z]+", "_", column.lower()).strip("_") or "col"
+    return out if out[0].isalpha() else f"c_{out}"
 
 
 @dataclass
@@ -609,7 +624,10 @@ def from_ddl(text: str) -> Model:
         and s.args.get("kind") == "TABLE"
         and isinstance(s.this, exp.Schema)
     ]
+    # A table created again (after DROP TABLE, or IF NOT EXISTS twice) is its last definition,
+    # kept where it first appeared.
     by_name = {p.name: p for p in parsed}
+    parsed = list(by_name.values())
 
     def resolve(key: str) -> str:
         """schema.table as written, or a bare name that only one table has."""
@@ -707,14 +725,20 @@ def from_ddl(text: str) -> Model:
             hidden = fk_cols - keys
         hidden |= {d for parent, d in discriminators if parent == p.name}
         attrs = [
-            Attribute(c, _type_from_sql(t), c in keys) for c, t in p.columns if c not in hidden
+            Attribute(_attr_name(c), _type_from_sql(t), c in keys)
+            for c, t in p.columns
+            if c not in hidden
         ]
         entities.append(Entity(display[p.name], attrs, p.name in owned))
     for p in parsed:
         if is_junction(p):
             (_, a, _), (_, b, _) = p.foreign
             fk_cols = {c for cols, _, _ in p.foreign for c in cols}
-            attrs = [Attribute(c, _type_from_sql(t)) for c, t in p.columns if c not in fk_cols]
+            attrs = [
+                Attribute(_attr_name(c), _type_from_sql(t))
+                for c, t in p.columns
+                if c not in fk_cols
+            ]
             relationships.append(
                 Relationship(display[p.name], End(display[a], "N"), End(display[b], "N"), attrs)
             )

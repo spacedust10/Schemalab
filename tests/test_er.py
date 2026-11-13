@@ -52,7 +52,6 @@ def test_parse_entities_keys_and_relationships() -> None:
         ("entity A { x money key }", "line 1: money is not a supported type"),
         ("entity A { x int key }\nrelationship R: A 1 -- N B", "line 2: B is not an entity"),
         ("entity A { x int key }\nrelationship R: A 2 -- N A", "line 2: write a relationship as"),
-        ("entity Order { x int key }", "line 1: Order is a reserved word in SQL"),
         ("table A { x int key }", "line 1: start a line with entity, relationship or isa"),
         ("", "Describe at least one entity"),
     ],
@@ -256,3 +255,13 @@ def test_from_ddl_reads_a_mysqldump() -> None:
     assert [e.name for e in model.entities] == ["Items", "Shelves"]
     [rel] = model.relationships
     assert (rel.kind, rel.left.entity, rel.right.entity) == ("1:N", "Shelves", "Items")
+
+
+def test_a_reserved_word_as_an_entity_is_quoted_in_every_dialect() -> None:
+    model = parse(
+        "entity Order { id int key }\nentity Item { id int key }\n"
+        "relationship Has: Order 1 -- N Item"
+    )
+    for dialect in DIALECTS:
+        ddl = to_ddl(model, dialect)
+        assert sqlglot.parse(ddl, read=dialect)  # parses back in its own dialect

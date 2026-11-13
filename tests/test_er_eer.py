@@ -284,3 +284,31 @@ def test_an_explicit_null_column_is_optional_not_required() -> None:
     )
     [r] = m.relationships
     assert r.right.total is False  # NULL means a u need not have a t
+
+
+def test_quoted_names_with_spaces_become_valid_names() -> None:
+    m = from_ddl(
+        'CREATE TABLE "Order Items" ("Item Id" INT PRIMARY KEY, "Unit Price ($)" NUMERIC(8,2));'
+        'CREATE TABLE "Order Notes" (id INT PRIMARY KEY, "Item Id" INT REFERENCES "Order Items");'
+    )
+    assert [e.name for e in m.entities] == ["OrderItems", "OrderNotes"]
+    assert [a.name for a in m.entities[0].attributes] == ["item_id", "unit_price"]
+    assert parse(to_text(m)) == m  # the design text reads back
+    assert len(m.relationships) == 1
+
+
+def test_a_table_named_like_a_reserved_word_is_kept_and_quoted() -> None:
+    m = from_ddl("CREATE TABLE user (id INT PRIMARY KEY, name TEXT);")
+    assert [e.name for e in m.entities] == ["User"]
+    con = sqlite3.connect(":memory:")
+    con.executescript(to_ddl(parse(to_text(m)), "sqlite"))
+    assert con.execute('SELECT count(*) FROM "user"').fetchone() == (0,)
+
+
+def test_a_table_created_again_counts_once_as_its_last_definition() -> None:
+    m = from_ddl(
+        "CREATE TABLE IF NOT EXISTS t (id INT PRIMARY KEY);"
+        "DROP TABLE t; CREATE TABLE t (id INT PRIMARY KEY, note TEXT);"
+    )
+    [t] = m.entities
+    assert [a.name for a in t.attributes] == ["id", "note"]
