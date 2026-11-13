@@ -1,8 +1,10 @@
 """ER designer endpoints."""
 
+import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -129,3 +131,46 @@ def test_the_model_carries_weak_entities_and_specializations(client: TestClient)
             "discriminator": "user_type",
         }
     ]
+
+
+@pytest.mark.parametrize("fixture", ["er_users.sql", "schemas.sql"])
+def test_design_from_uploaded_tables_matches_the_file_it_came_from(
+    client: TestClient, fixture: str
+) -> None:
+    # Weak entities, composite keys and subtypes must survive the upload, not only the file.
+    sql = (Path(__file__).parent.parent / "fixtures" / fixture).read_bytes()
+    headers = register(client)
+    up = client.post(
+        "/datasets",
+        params={"name": fixture},
+        content=sql,
+        headers={**headers, "content-type": "application/octet-stream"},
+    )
+    assert up.status_code == 201, up.text
+    direct = post(client, "/er/ddl", {"design": sql.decode()}, headers).json()["model"]
+    mine = client.get("/er/mine", headers=headers).json()["model"]
+
+    # Uploads rename tables and columns to lowercase identifiers; the structure must match.
+    def norm(m: dict[str, Any]) -> tuple[Any, ...]:
+        m = json.loads(json.dumps(m).lower())
+        for sp in m["specializations"]:
+            sp["children"].sort()
+        return (
+            sorted(
+                (e["name"], e["weak"], [(a["name"], a["key"]) for a in e["attributes"]])
+                for e in m["entities"]
+            ),
+            sorted(
+                (
+                    r["left"]["entity"],
+                    r["right"]["entity"],
+                    r["kind"],
+                    r["identifying"],
+                    r["right"]["total"],
+                )
+                for r in m["relationships"]
+            ),
+            m["specializations"],
+        )
+
+    assert norm(mine) == norm(direct)

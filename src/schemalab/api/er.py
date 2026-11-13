@@ -85,18 +85,40 @@ _REFERENCE = re.compile(r"references (\w+)(?:\((\w+)\))?")
 
 
 def _ddl_from_profiles(tables: list[dict[str, Any]]) -> str:
-    """CREATE TABLE statements from uploaded tables and their key notes. Names are [a-z0-9_]
-    identifiers made on upload; they are quoted in case one is a reserved word."""
+    """CREATE TABLE statements from uploaded tables and the keys stored with them (or, for
+    older uploads, their column notes). Names are [a-z0-9_] identifiers made on upload; they
+    are quoted in case one is a reserved word."""
+
+    def q(names: list[str]) -> str:
+        return ", ".join(f'"{n}"' for n in names)
+
     statements = []
     for t in tables:
-        lines = [f'"{c["name"]}" {c["type"]}' for c in t["columns"]]
-        key = [c["name"] for c in t["columns"] if (c["note"] or "").endswith("primary key")]
-        if key:
-            lines.append("PRIMARY KEY (" + ", ".join(f'"{k}"' for k in key) + ")")
-        for c in t["columns"]:
-            ref = _REFERENCE.fullmatch(c["note"] or "")
-            if ref:
-                target = f'"{ref[1]}"' + (f' ("{ref[2]}")' if ref[2] else "")
-                lines.append(f'FOREIGN KEY ("{c["name"]}") REFERENCES {target}')
+        keys = t.get("keys")
+        required = set(keys.get("not_null", [])) if keys else set()
+        lines = [
+            f'"{c["name"]}" {c["type"]}' + (" NOT NULL" if c["name"] in required else "")
+            for c in t["columns"]
+        ]
+        if keys:
+            if keys["primary"]:
+                lines.append(f"PRIMARY KEY ({q(keys['primary'])})")
+            lines += [f"UNIQUE ({q(u)})" for u in keys["unique"] if u]
+            for cols, target, refs in keys["foreign"]:
+                if cols:
+                    to = f" ({q(refs)})" if refs else ""
+                    lines.append(f'FOREIGN KEY ({q(cols)}) REFERENCES "{target}"{to}')
+            for col, values in keys["checks"].items():
+                quoted = ", ".join("'" + str(v).replace("'", "''") + "'" for v in values)
+                lines.append(f'CHECK ("{col}" IN ({quoted}))')
+        else:
+            parts = {c["name"]: (c["note"] or "").split("; ") for c in t["columns"]}
+            key = [n for n, p in parts.items() if any(x.endswith("primary key") for x in p)]
+            if key:
+                lines.append(f"PRIMARY KEY ({q(key)})")
+            for n, p in parts.items():
+                for ref in filter(None, (_REFERENCE.fullmatch(x) for x in p)):
+                    target = f'"{ref[1]}"' + (f' ("{ref[2]}")' if ref[2] else "")
+                    lines.append(f'FOREIGN KEY ("{n}") REFERENCES {target}')
         statements.append(f'CREATE TABLE "{t["name"]}" ({", ".join(lines)})')
     return ";\n".join(statements) + ";"

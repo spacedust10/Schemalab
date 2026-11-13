@@ -48,6 +48,12 @@ class DumpTable:
     csv: Path
     row_count: int = 0
     source_columns: dict[str, int] = field(default_factory=dict, repr=False)
+    # The keys as declared, in this table's column names, for drawing the design later.
+    primary: list[str] = field(default_factory=list)
+    unique: list[list[str]] = field(default_factory=list)
+    foreign: list[tuple[list[str], str, list[str]]] = field(default_factory=list)
+    checks: dict[str, list[str]] = field(default_factory=dict)  # col IN ('a', 'b')
+    not_null: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -283,28 +289,77 @@ class _Reader:
         self._files[name] = (f, writer)
         self.add_keys(table, schema)
 
+    def note(self, table: DumpTable, column: str, text: str) -> None:
+        """Adds to a column's key note; key facts come first, then references."""
+        parts = self.keys.get((table.name, column), "").split("; ")
+        if text not in parts:
+            parts = sorted(filter(None, [*parts, text]), key=lambda p: p.startswith("references"))
+            self.keys[(table.name, column)] = "; ".join(parts)
+
     def add_keys(self, table: DumpTable, node: exp.Expr) -> bool:
         found = False
+
+        def cols_of(items: list[exp.Expr]) -> list[str]:
+            return [c for i in items if (c := self.column(table, i.name))]
+
         for pk in node.find_all(exp.PrimaryKey):
-            cols = [self.column(table, i.name) for i in pk.expressions]
-            note = "primary key" if len(cols) == 1 else "part of the primary key"
-            for name in filter(None, cols):
-                self.keys[(table.name, name)] = note
+            cols = cols_of(pk.expressions)
+            table.primary = cols
+            for name in cols:
+                self.note(
+                    table, name, "primary key" if len(cols) == 1 else "part of the primary key"
+                )
             found = True
+        for item in node.find_all(exp.UniqueColumnConstraint):
+            if isinstance(item.this, exp.Schema):
+                table.unique.append(cols_of(item.this.expressions))
         for column in node.find_all(exp.ColumnDef):
             own = self.column(table, column.name)
             for c in column.constraints:
+                if (
+                    own
+                    and isinstance(c.kind, exp.NotNullColumnConstraint)
+                    and own not in table.not_null
+                ):
+                    table.not_null.append(own)
                 if own and isinstance(c.kind, exp.PrimaryKeyColumnConstraint):
-                    self.keys[(table.name, own)] = "primary key"
+                    table.primary = [own]
+                    self.note(table, own, "primary key")
+                elif own and isinstance(c.kind, exp.UniqueColumnConstraint):
+                    table.unique.append([own])
                 elif own and isinstance(c.kind, exp.Reference):
-                    self.keys[(table.name, own)] = self.reference(c.kind)
+                    self.note(table, own, self.reference(c.kind))
+                    table.foreign.append(([own], *self.target(c.kind)))
         for fk in node.find_all(exp.ForeignKey):
-            note = self.reference(fk.args["reference"])
-            for i in fk.expressions:
-                if col := self.column(table, i.name):
-                    self.keys[(table.name, col)] = note
+            ref = fk.args["reference"]
+            note = self.reference(ref)
+            cols = cols_of(fk.expressions)
+            for col in cols:
+                self.note(table, col, note)
+            table.foreign.append((cols, *self.target(ref)))
             found = True
+        for found_in in node.find_all(exp.In):
+            checked = (
+                self.column(table, found_in.this.name)
+                if isinstance(found_in.this, exp.Column)
+                else None
+            )
+            values = found_in.expressions
+            strings = all(isinstance(v, exp.Literal) and v.is_string for v in values)
+            if checked and values and strings:
+                table.checks[checked] = [v.this for v in values]
         return found
+
+    def target(self, ref: exp.Reference) -> tuple[str, list[str]]:
+        """The referenced table's name here and its columns (empty: its primary key)."""
+        target = ref.this
+        table_node = target.this if isinstance(target, exp.Schema) else target
+        other = self.find(table_node)
+        name = other.name if other else ident(table_node.name)
+        cols = target.expressions if isinstance(target, exp.Schema) else []
+        return name, [
+            (self.column(other, c.name) if other else None) or ident(c.name) for c in cols
+        ]
 
     def alter_keys(self, node: exp.Alter) -> bool:
         table = self.find(node.this)

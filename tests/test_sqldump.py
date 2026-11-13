@@ -183,7 +183,10 @@ def test_tables_nested_in_create_schema_are_read(tmp_path: Path) -> None:
 
 def test_keys_added_later_resolve_across_schemas(tmp_path: Path) -> None:
     keys = read_dump(SCHEMAS_SQL, tmp_path).keys
-    assert keys[("person", "businessentityid")] == "references businessentity(businessentityid)"
+    # Both facts about a column that is the key and a foreign key.
+    assert keys[("person", "businessentityid")] == (
+        "primary key; references businessentity(businessentityid)"
+    )
     assert keys[("customer", "personid")] == "references person(businessentityid)"
     assert keys[("crm_customer", "salescustomerid")] == "references customer(customerid)"
 

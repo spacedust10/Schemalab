@@ -792,6 +792,10 @@ def _read_table(create: exp.Create) -> _Parsed:
                             p.checks[item.name] = {v.name for v in found.expressions}
         elif isinstance(item, exp.PrimaryKey):
             p.primary.extend(i.name for i in item.expressions)
+        elif item.find(exp.Check, exp.CheckColumnConstraint):
+            for found in item.find_all(exp.In):
+                if isinstance(found.this, exp.Column):
+                    p.checks[found.this.name] = {v.name for v in found.expressions}
         elif isinstance(item, exp.UniqueColumnConstraint) and isinstance(item.this, exp.Schema):
             p.unique.append({i.name for i in item.this.expressions})
         elif isinstance(item, exp.ForeignKey):

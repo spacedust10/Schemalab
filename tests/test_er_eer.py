@@ -263,3 +263,15 @@ def test_a_design_can_hold_every_table_an_upload_can() -> None:
     assert MAX_ENTITIES >= MAX_TABLES
     text = "\n".join(f"entity E{i} {{ id int key }}" for i in range(MAX_TABLES))
     assert len(parse(text).entities) == MAX_TABLES
+
+
+def test_a_table_level_check_defines_a_total_specialization() -> None:
+    m = from_ddl(
+        "CREATE TABLE p (id INT PRIMARY KEY, kind TEXT NOT NULL, UNIQUE (id, kind),"
+        "  CHECK (kind IN ('a', 'b')));"
+        "CREATE TABLE a (id INT PRIMARY KEY, kind TEXT NOT NULL,"
+        "  FOREIGN KEY (id, kind) REFERENCES p (id, kind));"
+        "CREATE TABLE b (id INT PRIMARY KEY, kind TEXT NOT NULL,"
+        "  FOREIGN KEY (id, kind) REFERENCES p (id, kind));"
+    )
+    assert m.specializations == [Specialization("P", ["A", "B"], True, True, "kind")]

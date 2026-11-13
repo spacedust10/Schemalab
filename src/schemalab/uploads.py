@@ -8,6 +8,7 @@ the old file are not disturbed. Model-written SQL only ever reads the result thr
 """
 
 import csv
+import json
 import re
 import shutil
 import tempfile
@@ -32,7 +33,9 @@ MAX_TABLES = 100  # a whole sample database, like AdventureWorks (68), fits
 MAX_COLUMNS = 500
 SUFFIXES = (".csv", ".xlsx", ".sql")
 # Key notes are built from [a-z0-9_] identifiers, so they are safe inside a SQL string.
-_NOTE = re.compile(r"(primary key|part of the primary key|references [a-z0-9_]+(\([a-z0-9_]+\))?)")
+_NOTE_PART = r"(primary key|part of the primary key|references [a-z0-9_]+(\([a-z0-9_]+\))?)"
+_NOTE = re.compile(rf"{_NOTE_PART}(; {_NOTE_PART})*")
+_KEYS = "schemalab keys "  # a table comment that starts so holds its keys as JSON
 
 # Trusted connection, but still no extension downloads.
 _CONFIG: dict[str, str | bool | int | float | list[str]] = {
@@ -140,6 +143,18 @@ def _load_dump(con: duckdb.DuckDBPyConnection, src: Path, work: Path, taken: set
         note = re.sub(r"references (\w+)", lambda m: f"references {renamed.get(m[1], m[1])}", note)
         if _NOTE.fullmatch(note):
             con.execute(f'COMMENT ON COLUMN "{renamed[table_key]}"."{column}" IS \'{note}\'')
+    for table in dump.tables:
+        if table.primary or table.foreign:
+            keys = {
+                "primary": table.primary,
+                "unique": table.unique,
+                "foreign": [[c, renamed.get(t, t), r] for c, t, r in table.foreign],
+                "checks": {c: v[:50] for c, v in table.checks.items()},
+                "not_null": table.not_null,
+            }
+            # Names are [a-z0-9_]; CHECK values come from the file, so quotes are doubled.
+            text = (_KEYS + json.dumps(keys)).replace("'", "''")
+            con.execute(f"COMMENT ON TABLE \"{renamed[table.name]}\" IS '{text}'")
     return Imported([renamed[t.name] for t in dump.tables], dict(dump.skipped))
 
 
@@ -259,7 +274,12 @@ def list_tables(db: Path) -> list[dict[str, Any]]:
                         "note": notes.get(s["column_name"]) or None,
                     }
                 )
-            out.append({"name": name, "rows": rows, "columns": columns})
+            (comment,) = con.execute(
+                "SELECT comment FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = ?",
+                [name],
+            ).fetchone() or (None,)
+            keys = json.loads(comment[len(_KEYS) :]) if (comment or "").startswith(_KEYS) else None
+            out.append({"name": name, "rows": rows, "columns": columns, "keys": keys})
     return out
 
 
