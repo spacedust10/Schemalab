@@ -127,8 +127,83 @@ def _move(c: psycopg.Connection[Any], mode: str, src: int, dst: int) -> None:
     c.execute("UPDATE demo_accounts SET balance = %s WHERE id = %s", [balances[dst] + AMOUNT, dst])
 
 
+# Idempotency keys
+
+PAYMENTS = 10
+
+
+def idempotency(mode: str, connect: Connect) -> Result:
+    """Each payment request arrives three times at once, as when a client retries after a
+    timeout while the first attempt is still being processed."""
+    with connect() as c:
+        c.execute("DROP TABLE IF EXISTS demo_charges, demo_idempotency")
+        c.execute(
+            "CREATE TABLE demo_charges (id serial PRIMARY KEY, request text NOT NULL, "
+            "amount int NOT NULL)"
+        )
+        c.execute("CREATE TABLE demo_idempotency (key text PRIMARY KEY, charge_id int)")
+    counts = {"requests": 0, "replayed": 0}
+    lock = threading.Lock()
+    rounds = threading.Barrier(WORKERS)  # all copies of a request start together
+
+    def worker(w: int) -> None:
+        with connect() as c:
+            for p in range(PAYMENTS):
+                rounds.wait()
+                replayed = _pay(c, mode, f"payment-{p}")
+                with lock:
+                    counts["requests"] += 1
+                    counts["replayed"] += replayed
+
+    started = time.perf_counter()
+    _together(worker)
+    with connect() as c:
+        charges, twice = c.execute(
+            "SELECT count(*), (SELECT count(*) FROM (SELECT request FROM demo_charges "
+            "GROUP BY request HAVING count(*) > 1) d) FROM demo_charges"
+        ).fetchone() or (0, 0)
+    return {
+        "checks": [
+            _check("Charges made", PAYMENTS, charges),
+            _check("Customers charged twice", 0, twice),
+        ],
+        "stats": counts,
+        "ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
+def _pay(c: psycopg.Connection[Any], mode: str, key: str) -> int:
+    """Handle one request; 1 if it was answered from an earlier attempt instead of charging."""
+    with c.transaction():
+        if mode == "key":
+            # The unique key is claimed in the same transaction as the charge. A copy that
+            # arrives meanwhile waits on the key's index entry, then finds it taken.
+            claimed = c.execute(
+                "INSERT INTO demo_idempotency (key) VALUES (%s) ON CONFLICT (key) DO NOTHING",
+                [key],
+            ).rowcount
+            if not claimed:
+                return 1  # answer with the stored result of the first attempt
+            row = c.execute(
+                "INSERT INTO demo_charges (request, amount) VALUES (%s, 25) RETURNING id", [key]
+            ).fetchone()
+            c.execute(
+                "UPDATE demo_idempotency SET charge_id = %s WHERE key = %s",
+                [row[0] if row else None, key],
+            )
+            return 0
+        if mode == "check_first":
+            seen = c.execute("SELECT 1 FROM demo_charges WHERE request = %s", [key]).fetchone()
+            time.sleep(RACE_PAUSE)  # the payment provider is called here
+            if seen:
+                return 1
+        c.execute("INSERT INTO demo_charges (request, amount) VALUES (%s, 25)", [key])
+        return 0
+
+
 EXPERIMENTS: dict[str, tuple[Callable[[str, Connect], Result], tuple[str, ...]]] = {
     "transfer": (transfer, ("naive", "for_update", "atomic")),
+    "idempotency": (idempotency, ("no_key", "check_first", "key")),
 }
 
 

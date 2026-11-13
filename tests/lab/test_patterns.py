@@ -37,3 +37,24 @@ def test_locked_or_atomic_transfers_keep_every_cent(lab: Lab, mode: str) -> None
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert check(got, "Money in the bank")["actual"] == 3000
     assert got["stats"]["deadlocks"] == 0
+
+
+def test_without_a_key_every_retry_charges_again(lab: Lab) -> None:
+    got = lab.pattern("idempotency", "no_key")
+    assert check(got, "Charges made") == {
+        "label": "Charges made",
+        "expected": 10,
+        "actual": 30,
+        "ok": False,
+    }
+
+
+def test_checking_first_still_races(lab: Lab) -> None:
+    got = lab.pattern("idempotency", "check_first")
+    assert check(got, "Customers charged twice")["actual"] > 0
+
+
+def test_an_idempotency_key_charges_each_payment_once(lab: Lab) -> None:
+    got = lab.pattern("idempotency", "key")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]
+    assert got["stats"]["requests"] == 30 and got["stats"]["replayed"] == 20
