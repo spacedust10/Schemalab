@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from schemalab.api.auth import UserDep
 from schemalab.config import get_settings
+from schemalab.lab import patterns
 from schemalab.lab.guard import LabSQLError
 from schemalab.lab.scenarios import BY_ID, SCENARIOS
 from schemalab.lab.session import Lab
@@ -133,6 +134,33 @@ def explain(user: UserDep, body: ExplainRequest) -> dict[str, Any]:
     except psycopg.Error as e:
         detail = (e.diag.message_primary or str(e)).strip()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail) from None
+
+
+class PatternRequest(BaseModel):
+    id: Annotated[str, StringConstraints(max_length=40)]
+    mode: Annotated[str, StringConstraints(max_length=40)]
+
+
+@router.get("/patterns")
+def pattern_list(user: UserDep) -> list[dict[str, Any]]:
+    return patterns.CATALOG
+
+
+@router.post("/pattern")
+def pattern(user: UserDep, body: PatternRequest) -> dict[str, Any]:
+    """Run one transaction-pattern experiment (fixed SQL) in the user's lab."""
+    modes = {p["id"]: [m["id"] for m in p["modes"]] for p in patterns.CATALOG}
+    if body.mode not in modes.get(body.id, []):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Choose an experiment and a way to run it."
+        )
+    lab = _lab(user)
+    try:
+        return lab.pattern(body.id, body.mode)
+    except (psycopg.Error, RuntimeError) as e:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"The experiment stopped: {str(e).splitlines()[0]}"
+        ) from None
 
 
 @router.get("/result")

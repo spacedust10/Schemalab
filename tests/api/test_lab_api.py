@@ -117,3 +117,34 @@ def test_explain_over_http(lab_client: TestClient) -> None:
     assert got["advice"][0]["sql"] == "CREATE INDEX t_g_idx ON t (g);"
     refused = lab_client.post("/lab/explain", json={"sql": "DELETE FROM t"}, headers=headers)
     assert refused.status_code == 400 and "Explain a SELECT" in refused.json()["detail"]
+
+
+def test_patterns_are_listed_with_their_ways(lab_client: TestClient) -> None:
+    got = lab_client.get("/lab/patterns", headers=register(lab_client)).json()
+    assert [p["id"] for p in got] == [
+        "transfer",
+        "idempotency",
+        "optimistic",
+        "outbox",
+        "new_order",
+    ]
+    transfer = got[0]
+    assert [m["id"] for m in transfer["modes"]] == ["naive", "for_update", "atomic"]
+    assert all(m["label"] and m["how"] for m in transfer["modes"]) and transfer["question"]
+
+
+def test_an_unknown_pattern_is_a_400(lab_client: TestClient) -> None:
+    headers = register(lab_client)
+    resp = lab_client.post("/lab/pattern", json={"id": "transfer", "mode": "yolo"}, headers=headers)
+    assert resp.status_code in (400, 409)
+
+
+@needs_postgres
+def test_a_pattern_runs_in_the_users_lab(lab_client: TestClient) -> None:
+    headers = register(lab_client)
+    assert lab_client.post("/lab/start", headers=headers).status_code in (200, 204)
+    got = lab_client.post(
+        "/lab/pattern", json={"id": "idempotency", "mode": "key"}, headers=headers
+    ).json()
+    assert got["name"] == "idempotency" and all(c["ok"] for c in got["checks"])
+    assert got["summary"].startswith("Every check passed")

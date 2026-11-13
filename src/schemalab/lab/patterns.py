@@ -476,7 +476,140 @@ EXPERIMENTS: dict[str, tuple[Callable[[str, Connect], Result], tuple[str, ...]]]
 }
 
 
+def _mode(id: str, label: str, how: str) -> dict[str, str]:
+    return {"id": id, "label": label, "how": how}
+
+
+CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "transfer",
+        "title": "Ledger transfer",
+        "question": "Three workers make 60 transfers around three accounts at once. "
+        "Is every cent still there?",
+        "modes": [
+            _mode(
+                "naive",
+                "Read, then write",
+                "Each transfer reads both balances, computes "
+                "the new ones in the application, and writes them back.",
+            ),
+            _mode(
+                "for_update",
+                "SELECT ... FOR UPDATE",
+                "Reads both rows with FOR UPDATE, "
+                "in id order, so other transfers wait their turn and none deadlock.",
+            ),
+            _mode(
+                "atomic",
+                "UPDATE in place",
+                "UPDATE ... SET balance = balance - 10 WHERE "
+                "balance >= 10, rows in id order: the database does the arithmetic.",
+            ),
+        ],
+    },
+    {
+        "id": "idempotency",
+        "title": "Idempotency keys",
+        "question": "Each of 10 payment requests arrives three times at once, as when a "
+        "client retries a slow request. Is each customer charged once?",
+        "modes": [
+            _mode("no_key", "No key", "Every request charges."),
+            _mode(
+                "check_first",
+                "Check, then charge",
+                "Looks for an earlier charge for the request first, and charges if there is none.",
+            ),
+            _mode(
+                "key",
+                "Idempotency key",
+                "Claims the request's key with INSERT ... ON "
+                "CONFLICT DO NOTHING in the charge's transaction; copies get the first answer.",
+            ),
+        ],
+    },
+    {
+        "id": "optimistic",
+        "title": "Optimistic locking",
+        "question": "Three editors each add 1 to a product's stock five times, through a "
+        "form that holds no lock. Do all 15 edits arrive?",
+        "modes": [
+            _mode(
+                "last_write_wins",
+                "Last write wins",
+                "Reads the row, then saves it without checking whether anyone saved in between.",
+            ),
+            _mode(
+                "version",
+                "Version column",
+                "Saves with WHERE version = <the version it "
+                "read>; if no row changed, someone saved first, so it reads again and retries.",
+            ),
+        ],
+    },
+    {
+        "id": "outbox",
+        "title": "Transactional outbox",
+        "question": "The application crashes right after every fourth of 20 orders. Does "
+        "every order still reach the other services, exactly once?",
+        "modes": [
+            _mode(
+                "dual_write",
+                "Commit, then publish",
+                "Commits the order, then sends the event in a separate step.",
+            ),
+            _mode(
+                "outbox_no_lock",
+                "Outbox, plain SELECT",
+                "Writes the event to an outbox "
+                "table in the order's transaction; three relays read pending rows with a "
+                "plain SELECT.",
+            ),
+            _mode(
+                "outbox",
+                "Outbox, SKIP LOCKED",
+                "The same outbox; relays take pending rows "
+                "with FOR UPDATE SKIP LOCKED, so no two relays hold the same row.",
+            ),
+        ],
+    },
+    {
+        "id": "new_order",
+        "title": "TPC-C New-Order",
+        "question": "Three terminals place 60 orders in two districts. Are order numbers "
+        "unique and stock exact?",
+        "modes": [
+            _mode(
+                "naive",
+                "Read, then write",
+                "Reads the district's next order number and "
+                "each item's stock, then writes computed values.",
+            ),
+            _mode(
+                "for_update",
+                "SELECT ... FOR UPDATE",
+                "Locks the district row and the stock rows (items in id order) while reading them.",
+            ),
+            _mode(
+                "atomic",
+                "UPDATE in place",
+                "Takes the order number with UPDATE ... "
+                "RETURNING and stock with SET s_quantity = s_quantity - n.",
+            ),
+        ],
+    },
+]
+
+
+def _summary(checks: list[dict[str, Any]]) -> str:
+    failed = [c for c in checks if not c["ok"]]
+    if not failed:
+        return "Every check passed."
+    parts = "; ".join(f"{c['label']}: expected {c['expected']}, got {c['actual']}" for c in failed)
+    return f"{len(failed)} of {len(checks)} checks failed. {parts}."
+
+
 def run(name: str, mode: str, connect: Connect) -> Result:
     if name not in EXPERIMENTS or mode not in EXPERIMENTS[name][1]:
         raise ValueError(f"Unknown experiment {name} or mode {mode}.")
-    return {"name": name, "mode": mode, **EXPERIMENTS[name][0](mode, connect)}
+    result = EXPERIMENTS[name][0](mode, connect)
+    return {"name": name, "mode": mode, "summary": _summary(result["checks"]), **result}
