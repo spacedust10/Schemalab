@@ -251,7 +251,7 @@ class _Reader:
             self.skipped["CREATE TABLE AS"] += 1
         elif isinstance(node, exp.Insert):
             self.insert(node)
-        elif isinstance(node, exp.Alter) and self.alter_keys(node):
+        elif isinstance(node, exp.Alter) and (self.alter_columns(node) | self.alter_keys(node)):
             return
         else:
             self.skipped[_kind(node)] += 1
@@ -283,11 +283,44 @@ class _Reader:
                 columns.append((col, _type(item.args.get("kind"))))
         table = DumpTable(name, columns, self.work / f"{name}.csv", source_columns=source_columns)
         self.tables[f"{db.name.lower()}.{source.lower()}" if db else source.lower()] = table
-        f = table.csv.open("w", newline="")
-        writer = csv.writer(f)
-        writer.writerow([c for c, _ in columns])
-        self._files[name] = (f, writer)
         self.add_keys(table, schema)
+
+    def alter_columns(self, node: exp.Alter) -> bool:
+        """ADD and DROP COLUMN, while the table has no rows yet (the CSV file opens with its
+        first row, so its header has every column by then)."""
+        table = self.find(node.this)
+        actions = node.args.get("actions") or []
+        changes = [
+            a
+            for a in actions
+            if isinstance(a, exp.ColumnDef)
+            or (isinstance(a, exp.Drop) and a.args.get("kind") == "COLUMN")
+        ]
+        if table is None or not changes:
+            return False
+        if table.name in self._files:
+            self.skipped["ALTER TABLE column change after its rows"] += 1
+            return True
+        for change in changes:
+            if isinstance(change, exp.ColumnDef):
+                col = ident(change.name, {c for c, _ in table.columns})
+                table.source_columns[change.name.lower()] = len(table.columns)
+                table.columns.append((col, _type(change.args.get("kind"))))
+                self.add_keys(table, change)
+            else:
+                gone = {c.name.lower() for c in change.args.get("tables") or []}
+                kept = [
+                    (source, table.columns[i])
+                    for source, i in table.source_columns.items()
+                    if source not in gone
+                ]
+                kept.sort(key=lambda k: table.source_columns[k[0]])
+                table.columns = [c for _, c in kept]
+                table.source_columns = {source: i for i, (source, _) in enumerate(kept)}
+                names = {c for c, _ in table.columns}
+                table.primary = [c for c in table.primary if c in names]
+                table.not_null = [c for c in table.not_null if c in names]
+        return True
 
     def note(self, table: DumpTable, column: str, text: str) -> None:
         """Adds to a column's key note; key facts come first, then references."""
@@ -425,6 +458,11 @@ class _Reader:
         )
         if any(p is None for p in positions):
             return False
+        if table.name not in self._files:
+            f = table.csv.open("w", newline="")
+            header = csv.writer(f)
+            header.writerow([c for c, _ in table.columns])
+            self._files[table.name] = (f, header)
         _, writer = self._files[table.name]
         for row in rows:
             if len(row) != len(positions):

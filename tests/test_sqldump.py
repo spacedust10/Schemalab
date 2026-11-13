@@ -204,3 +204,27 @@ def test_an_explicit_null_is_not_recorded_as_not_null(tmp_path: Path) -> None:
         "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, title VARCHAR(8) NULL);", tmp_path
     )
     assert dump.tables[0].not_null == ["id"]
+
+
+def test_columns_added_and_dropped_before_rows_are_applied(tmp_path: Path) -> None:
+    dump = read_dump(
+        "CREATE TABLE doc (old INT, title TEXT, level INT);"
+        "ALTER TABLE doc DROP COLUMN level;"
+        "ALTER TABLE doc ADD node VARCHAR(10) DEFAULT '/';"
+        "ALTER TABLE doc ADD CONSTRAINT pk PRIMARY KEY (node);"
+        "INSERT INTO doc (old, title, node) VALUES (1, 'a', '/1/');",
+        tmp_path,
+    )
+    [doc] = dump.tables
+    assert [c for c, _ in doc.columns] == ["old", "title", "node"]
+    assert doc.primary == ["node"] and doc.row_count == 1
+    with doc.csv.open() as f:
+        assert list(csv.reader(f)) == [["old", "title", "node"], ["1", "a", "/1/"]]
+
+
+def test_a_column_change_after_rows_is_skipped_and_counted(tmp_path: Path) -> None:
+    dump = read_dump(
+        "CREATE TABLE t (a INT); INSERT INTO t VALUES (1); ALTER TABLE t ADD b INT;", tmp_path
+    )
+    assert [c for c, _ in dump.tables[0].columns] == ["a"]
+    assert dump.skipped["ALTER TABLE column change after its rows"] == 1
