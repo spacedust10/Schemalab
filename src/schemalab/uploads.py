@@ -192,10 +192,15 @@ def _load(
 ) -> str:
     # The name passed table_name's [a-z0-9_] filter; the path is bound. Excel sheets always have
     # a header row; for CSV files DuckDB detects one.
-    # null_padding: a short row gets NULLs and a long one an extra column, instead of the
-    # sniffer reading every row as one text column.
-    options = "null_padding = true" + (", header = true" if header else "")
+    options = "header = true" if header else "auto_detect = true"
     con.execute(f'CREATE TABLE "{name}" AS SELECT * FROM read_csv(?, {options})', [str(path)])  # noqa: S608
+    if _ragged(con, name, path):
+        # Rows with more or fewer fields than the header made the sniffer read each line as
+        # one text column. null_padding fills short rows with NULLs and gives a long row an
+        # extra column. It is not the default because it cannot read quoted line breaks.
+        con.execute(f'DROP TABLE "{name}"')
+        padded = f"{options}, null_padding = true"
+        con.execute(f'CREATE TABLE "{name}" AS SELECT * FROM read_csv(?, {padded})', [str(path)])  # noqa: S608
     _tidy_columns(con, name)
     columns = len(con.execute(f'DESCRIBE "{name}"').fetchall())
     if columns > MAX_COLUMNS:
@@ -205,6 +210,15 @@ def _load(
         raise UploadError("The file has no data rows.")
     taken.add(name)
     return name
+
+
+def _ragged(con: duckdb.DuckDBPyConnection, table: str, path: Path) -> bool:
+    """One column read from a file whose first line has delimiters: the sniffer gave up."""
+    if len(con.execute(f'DESCRIBE "{table}"').fetchall()) != 1:
+        return False
+    with path.open(encoding="utf-8", errors="replace") as f:
+        first = f.readline()
+    return any(d in first for d in ",;\t|")
 
 
 def _tidy_columns(con: duckdb.DuckDBPyConnection, table: str) -> None:

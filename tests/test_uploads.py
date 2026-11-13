@@ -317,3 +317,13 @@ def test_ragged_rows_keep_their_columns(tmp_path: Path, db: Path) -> None:
             (4, None),
             (5, 6),
         ]
+
+
+def test_a_quoted_field_with_a_line_break_still_loads(tmp_path: Path, db: Path) -> None:
+    text = 'id,note\n1,"line one\nline two"\n2,"has ""quotes"""\n'
+    import_file(db, csv_file(tmp_path, text), "notes.csv")
+    with duckdb.connect(str(db)) as con:
+        assert con.execute("SELECT note FROM notes ORDER BY id").fetchall() == [
+            ("line one\nline two",),
+            ('has "quotes"',),
+        ]
