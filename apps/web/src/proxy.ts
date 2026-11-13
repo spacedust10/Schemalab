@@ -12,4 +12,4 @@ export function proxy(request: NextRequest): NextResponse {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/", "/data", "/dashboard", "/normalize", "/er", "/algebra", "/lab", "/theory", "/plans", "/bench"] };
+export const config = { matcher: ["/", "/data", "/dashboard", "/normalize", "/er", "/algebra", "/lab", "/theory", "/plans", "/bench", "/patterns"] };

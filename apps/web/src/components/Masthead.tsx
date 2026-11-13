@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SignOut } from "./SignOut";
 
-type Page = "ask" | "data" | "dashboard" | "normalize" | "er" | "algebra" | "lab" | "theory" | "plans" | "bench";
+type Page = "ask" | "data" | "dashboard" | "normalize" | "er" | "algebra" | "lab" | "theory" | "plans" | "bench" | "patterns";
 
 export function Masthead({ signedIn = false, current }: { signedIn?: boolean; current?: Page }) {
   return (
@@ -45,6 +45,9 @@ export function Masthead({ signedIn = false, current }: { signedIn?: boolean; cu
             </Link>
             <Link href="/lab" prefetch={false} aria-current={current === "lab" ? "page" : undefined}>
               Lab
+            </Link>
+            <Link href="/patterns" prefetch={false} aria-current={current === "patterns" ? "page" : undefined}>
+              Patterns
             </Link>
             <Link href="/theory" prefetch={false} aria-current={current === "theory" ? "page" : undefined}>
               Theory

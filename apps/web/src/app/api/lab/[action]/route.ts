@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, rejectCrossSite, upstream } from "@/lib/api";
 
-const POSTS = new Set(["start", "stop", "run", "scenario", "explain"]);
-const GETS = new Set(["state", "result", "scenarios"]);
+const POSTS = new Set(["start", "stop", "run", "scenario", "explain", "pattern"]);
+const GETS = new Set(["state", "result", "scenarios", "patterns"]);
 type Params = { params: Promise<{ action: string }> };
 
 async function pass(api: Response): Promise<NextResponse> {
