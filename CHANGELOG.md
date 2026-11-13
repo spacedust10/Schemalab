@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Tested Days 1-14 against real files and hostile inputs, and fixed what broke:
+  - Ask: a model reply with an unclosed quote no longer ends the answer with nothing; parse errors read as plain text; a question over empty tables is answered once, saying they are empty.
+  - SQL guard: table functions behind LATERAL are refused.
+  - Uploads: Windows-1252 and UTF-16 CSV files load; ragged rows keep their columns; only reserved words get a leading underscore; errors no longer show server paths; MySQL integer types, SQL Server scripts and tables dropped and created again load correctly.
+  - Design: quoted names with spaces, reserved table names (user, order) and tables created twice are read.
+  - Normalize: decomposition no longer hangs on 14-16 attributes, each request has one work limit, and 2NF violations are reported once each.
+  - Algebra: deeply nested expressions are refused with a message instead of a server error.
+  - Lab: a slow statement is shown as running, not as waiting for a lock.
 - Design: weak entities, identifying relationships and specialization (ISA) are read from SQL, written in the design text (weak entity, identifying relationship, isa Super: A, B disjoint total on kind) and mapped back to tables. Chen diagrams use Elmasri and Navathe's notation; crow's-foot diagrams use IDEF1X conventions. A foreign key covering a table's key is now 1:1 or a subtype, not 1:N, and relationship names no longer come from the first key column.
 - Diagrams are laid out in layers (owners and supertypes above), with relationship names kept clear of boxes and of each other, and long rows wrapped.
 - .sql files: tables nested in CREATE SCHEMA, CREATE DOMAIN types, schema-qualified names, columns added by ALTER TABLE and psql meta-commands are handled, so the AdventureWorks for Postgres script loads. When a file's rows live in CSV files it loads with \copy, the upload says the tables are empty and why.
