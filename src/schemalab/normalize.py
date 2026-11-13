@@ -255,10 +255,16 @@ def normal_form(attrs: list[str], fds: list[FD]) -> Report:
 def project(fds: list[FD], attrs: list[str]) -> list[FD]:
     """A canonical cover of the dependencies that hold on `attrs`."""
     sub = frozenset(attrs)
+    # Only attributes on some left side can determine anything; the rest never help.
+    deciders = [a for a in attrs if any(a in fd.lhs for fd in fds)]
     found: list[FD] = []
-    for size in range(1, len(attrs) + 1):
-        for part in combinations(attrs, size):
+    for size in range(1, len(deciders) + 1):
+        for part in combinations(deciders, size):
             x = frozenset(part)
+            # A left side with an attribute its other attributes already determine gives only
+            # dependencies the smaller left side gives too; skipping it keeps the list small.
+            if any(a in closure(x - {a}, fds) for a in x if size > 1):
+                continue
             y = (closure(x, fds) & sub) - x
             if y:
                 found.append(FD(x, y))

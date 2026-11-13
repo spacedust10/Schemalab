@@ -208,3 +208,42 @@ def test_decompositions_hold_their_guarantees_on_random_schemas() -> None:
         third = synthesize_3nf(attrs, f)
         assert third.lossless and third.lost == [], (attrs, f)
         assert all(normal_form(r.attrs, r.fds).form in ("3NF", "BCNF") for r in third.relations)
+
+
+def test_bcnf_of_a_long_chain_is_fast_and_gives_the_pairs() -> None:
+    import time
+
+    names = [f"A{i}" for i in range(16)]
+    attrs, fds = parse(f"R({','.join(names)})", "\n".join(f"A{i} -> A{i + 1}" for i in range(15)))
+    start = time.perf_counter()
+    d = bcnf_decompose(attrs, fds)
+    assert time.perf_counter() - start < 5
+    assert sorted(r.attrs for r in d.relations) == sorted(
+        [[f"A{i}", f"A{i + 1}"] for i in range(15)]
+    )
+    assert d.lossless and not d.lost
+
+
+def test_a_cycle_of_keys_is_already_in_bcnf_and_answers_fast() -> None:
+    import time
+
+    names = [f"A{i}" for i in range(14)]
+    attrs, fds = parse(
+        f"R({','.join(names)})", "\n".join(f"A{i} -> A{(i + 1) % 14}" for i in range(14))
+    )
+    start = time.perf_counter()
+    d = bcnf_decompose(attrs, fds)
+    assert time.perf_counter() - start < 5
+    assert [r.attrs for r in d.relations] == [names]
+
+
+def test_a_wide_relation_with_few_dependencies_decomposes_fast() -> None:
+    # Like an uploaded table: many columns, one dependency.
+    import time
+
+    names = [f"A{i}" for i in range(16)]  # the most parse allows
+    attrs, fds = parse(f"R({','.join(names)})", "A0 -> A1")
+    start = time.perf_counter()
+    d = bcnf_decompose(attrs, fds)
+    assert time.perf_counter() - start < 5
+    assert sorted(len(r.attrs) for r in d.relations) == [2, 15]
