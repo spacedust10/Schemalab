@@ -96,10 +96,22 @@ def _tokens(text: str) -> list[_Token]:
     return out
 
 
+MAX_DEPTH = 50  # deeper trees overflow the SQL generator's recursion
+
+
 def parse_ra(text: str) -> Node:
     if not text.strip():
         raise RAError("Write a relational algebra expression, like π[name](student).")
     tokens = _tokens(text)
+    depth = deepest = 0
+    for t in tokens:
+        if t.kind in ("(", ")"):
+            depth += 1 if t.kind == "(" else -1
+            deepest = max(deepest, depth)
+    if deepest > MAX_DEPTH:
+        raise RAError(
+            f"The expression is nested too deeply ({deepest} levels; at most {MAX_DEPTH})."
+        )
     parser = _Parser(tokens)
     node = parser.expr()
     leftover = parser.peek()

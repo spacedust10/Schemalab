@@ -170,3 +170,14 @@ def test_tree_labels_operators_and_leaves() -> None:
             }
         ],
     }
+
+
+def test_deep_nesting_is_refused_with_a_message_not_a_crash() -> None:
+    deep = "σ[a > 1](" * 300 + "R" + ")" * 300
+    with pytest.raises(RAError, match="nested too deeply"):
+        parse_ra(deep)
+
+
+def test_ordinary_nesting_still_translates() -> None:
+    nested = "σ[a > 1](" * 40 + "R" + ")" * 40
+    assert to_sql(parse_ra(nested)).startswith("SELECT")
