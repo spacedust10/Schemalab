@@ -202,3 +202,14 @@ def test_control_characters_from_the_sql_never_reach_the_message() -> None:
         check_sql("SELECT \x1b]0;owned\x07 FROM \x00orders WHERE", {"orders"})
     assert not any(ord(c) < 32 and c not in "\n\t" for c in str(e.value))
     assert "\x7f" not in str(e.value)
+
+
+def test_unicode_format_characters_never_reach_the_message_and_it_stays_short() -> None:
+    # Right-to-left override, zero-width space and line separator can disguise text too.
+    hidden = chr(0x202E) + chr(0x200B) + chr(0x2028)
+    with pytest.raises(UnsafeSQLError) as e:
+        check_sql(f"SELECT a {hidden} b FROM orders WHERE", {"orders"})
+    message = str(e.value)
+    assert "SELECT" in message  # the message does quote the SQL
+    assert not any(c in message for c in hidden)
+    assert len(message) <= 600

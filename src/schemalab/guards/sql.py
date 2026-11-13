@@ -6,6 +6,7 @@ allow-list. Everything else is rejected before it reaches DuckDB. The read-only 
 """
 
 import re
+import unicodedata
 from collections.abc import Collection
 from typing import Any
 
@@ -48,8 +49,12 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
         # sqlglot underlines the bad token with terminal escape codes, and the message quotes
         # the model's SQL: drop escape sequences, then every other control character.
         plain = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
-        plain = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "", plain)
-        raise UnsafeSQLError(f"could not parse SQL: {plain}") from e
+        # Keep letters, digits, punctuation, symbols and spaces; drop control and format
+        # characters (including bidi overrides and zero-width ones) and line separators.
+        plain = "".join(
+            c for c in plain if c in "\n\t" or unicodedata.category(c)[0] not in "CZ" or c == " "
+        )
+        raise UnsafeSQLError(f"could not parse SQL: {plain[:500]}") from e
     # A trailing comment after the last ';' parses as a bare Semicolon node.
     statements = [s for s in parsed if s is not None and not isinstance(s, exp.Semicolon)]
 
