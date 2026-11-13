@@ -106,24 +106,29 @@ def test_new_order_with_locks_or_atomic_updates_places_every_order(lab: Lab, mod
     assert check(got, "Orders placed")["actual"] == 60
 
 
-def test_a_second_run_while_one_is_running_is_refused_at_once(lab: Lab) -> None:
+def test_a_second_run_while_one_is_running_is_refused_at_once(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import threading
     import time
 
-    results: list[dict[str, Any]] = []
-    refused: list[str] = []
+    from schemalab.lab import patterns
 
-    def go() -> None:
-        try:
-            results.append(lab.pattern("transfer", "naive"))  # takes about a second
-        except RuntimeError as e:
-            refused.append(str(e))
+    running, release = threading.Event(), threading.Event()
 
-    first = threading.Thread(target=go)
+    def slow(name: str, mode: str, connect: Any) -> dict[str, Any]:
+        running.set()
+        release.wait(timeout=30)  # stays busy until the test has tried a second run
+        return {"name": name}
+
+    monkeypatch.setattr(patterns, "run", slow)
+    first = threading.Thread(target=lab.pattern, args=("transfer", "naive"))
     first.start()
-    time.sleep(0.2)
+    assert running.wait(timeout=10)
     start = time.perf_counter()
-    go()
-    assert time.perf_counter() - start < 0.5  # no waiting in line
-    first.join(timeout=60)
-    assert len(results) == 1 and refused == ["An experiment is already running in your lab."]
+    with pytest.raises(RuntimeError, match="already running"):
+        lab.pattern("transfer", "naive")
+    assert time.perf_counter() - start < 0.5  # refused at once, not queued
+    release.set()
+    first.join(timeout=30)
+    assert lab.pattern("transfer", "naive") == {"name": "transfer"}  # free again afterwards
