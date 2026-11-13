@@ -252,22 +252,44 @@ def normal_form(attrs: list[str], fds: list[FD]) -> Report:
 # Decompositions
 
 
+# Work bounds for projecting dependencies, which is exponential in the worst case.
+MAX_SUBSETS = 70_000  # every subset of 16 attributes fits
+MAX_FOUND = 2_000
+
+
 def project(fds: list[FD], attrs: list[str]) -> list[FD]:
     """A canonical cover of the dependencies that hold on `attrs`."""
     sub = frozenset(attrs)
     # Only attributes on some left side can determine anything; the rest never help.
     deciders = [a for a in attrs if any(a in fd.lhs for fd in fds)]
+    seen: dict[Attrs, Attrs] = {}  # closures, so each subset is computed once
+
+    def plus(x: Attrs) -> Attrs:
+        if x not in seen:
+            if len(seen) >= MAX_SUBSETS:
+                raise NormalizeError(
+                    "These dependencies have too many combinations to decompose here; "
+                    "try fewer attributes or dependencies."
+                )
+            seen[x] = closure(x, fds)
+        return seen[x]
+
     found: list[FD] = []
     for size in range(1, len(deciders) + 1):
         for part in combinations(deciders, size):
             x = frozenset(part)
             # A left side with an attribute its other attributes already determine gives only
             # dependencies the smaller left side gives too; skipping it keeps the list small.
-            if any(a in closure(x - {a}, fds) for a in x if size > 1):
+            if size > 1 and any(a in plus(x - {a}) for a in x):
                 continue
-            y = (closure(x, fds) & sub) - x
+            y = (plus(x) & sub) - x
             if y:
                 found.append(FD(x, y))
+    if len(found) > MAX_FOUND:
+        raise NormalizeError(
+            "These dependencies have too many combinations to decompose here; "
+            "try fewer attributes or dependencies."
+        )
     return minimal_cover(found)
 
 

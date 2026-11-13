@@ -247,3 +247,17 @@ def test_a_wide_relation_with_few_dependencies_decomposes_fast() -> None:
     d = bcnf_decompose(attrs, fds)
     assert time.perf_counter() - start < 5
     assert sorted(len(r.attrs) for r in d.relations) == [2, 15]
+
+
+def test_the_slowest_known_case_answers_or_refuses_within_seconds() -> None:
+    import time
+
+    names = [f"A{i}" for i in range(16)]
+    deps = "\n".join(f"A{i}, A{(i + 5) % 16} -> A{(i + 9) % 16}" for i in range(16))
+    attrs, fds = parse(f"R({','.join(names)})", deps)
+    start = time.perf_counter()
+    try:
+        bcnf_decompose(attrs, fds)
+    except NormalizeError as e:
+        assert "too many" in str(e)
+    assert time.perf_counter() - start < 5
