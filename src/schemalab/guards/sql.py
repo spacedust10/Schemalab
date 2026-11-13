@@ -5,6 +5,7 @@ allow-list. Everything else is rejected before it reaches DuckDB. The read-only 
 `engine.py` backs this up in case the parser and DuckDB ever disagree.
 """
 
+import re
 from collections.abc import Collection
 from typing import Any
 
@@ -44,7 +45,9 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
     try:
         parsed = sqlglot.parse(sql, read="duckdb")
     except sqlglot.errors.SqlglotError as e:  # ParseError, and TokenError for an unclosed quote
-        raise UnsafeSQLError(f"could not parse SQL: {e}") from e
+        # sqlglot underlines the bad token with terminal escape codes; keep the plain text.
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
+        raise UnsafeSQLError(f"could not parse SQL: {plain}") from e
     # A trailing comment after the last ';' parses as a bare Semicolon node.
     statements = [s for s in parsed if s is not None and not isinstance(s, exp.Semicolon)]
 

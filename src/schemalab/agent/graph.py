@@ -47,6 +47,7 @@ class State(TypedDict, total=False):
     result: QueryResult | None
     verdict: bool | None  # critic: True ok, False objected, None no usable verdict
     empty: bool  # the latest result had no rows, which is retried without the critic's model
+    empty_tables: list[str]  # every table the query read has no rows: retrying cannot help
     failed: bool
 
 
@@ -188,6 +189,12 @@ def _build(
         )
         writer = get_stream_writer()
         attempt = state["attempt"]
+        if not result.rows and (bare := _empty_tables(db_path, tables_read(result.sql))):
+            # The tables themselves are empty (an upload whose rows were left out): no query
+            # can find rows, so answer now instead of retrying.
+            why = f"{_and(bare)} {'has' if len(bare) == 1 else 'have'} no rows."
+            writer({"step": "critic", "ok": None, "issue": why, "attempt": attempt})
+            return {"verdict": None, "problem": why, "empty": False, "empty_tables": bare}
         if not result.rows:
             # No model needed: an empty result is suspicious enough to try again.
             issue: str | None = "The query returned no rows; check the filters and joins."
@@ -207,7 +214,10 @@ def _build(
             raise RuntimeError("answer reached without a result")  # routing guarantees one
         rows = [[json_value(v) for v in row] for row in result.rows]
         text = summarize(result.columns, rows, result.truncated)
-        if share_results:
+        if bare := state.get("empty_tables"):
+            verb = "has" if len(bare) == 1 else "have"
+            text = f"{_and(bare)} {verb} no rows, so there is nothing to show."
+        elif share_results:
             shown = rows[:20]
             reply = ask_model(
                 [
@@ -286,6 +296,26 @@ def _build(
     g.add_conditional_edges("critic", after_critic)
     g.add_edge("answer", END)
     return g.compile()
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _empty_tables(db_path: Path, tables: list[str]) -> list[str]:
+    """The tables a query read, if every one of them has no rows; else []."""
+    if not tables:
+        return []
+    with open_readonly(db_path) as con:
+        known = {r[0].lower(): r[0] for r in con.execute("SHOW TABLES").fetchall()}
+        names = [known[t.lower()] for t in tables if t.lower() in known]
+        if len(names) != len(tables):
+            return []
+        for name in names:
+            # Trusted: the name comes from the catalog, not from the model.
+            if con.execute(f'SELECT 1 FROM "{name}" LIMIT 1').fetchone():  # noqa: S608
+                return []
+    return names
 
 
 def _has_tables(db_path: Path) -> bool:

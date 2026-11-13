@@ -254,3 +254,13 @@ def test_category_values_reach_the_model_only_when_allowed(sample_db: Path) -> N
     assert "name VARCHAR -- values: 'c0', 'c1'" in shown.prompt(0)
     assert "name VARCHAR -- values:" in shown.prompt(1)  # the SQL writer sees them too
     assert answer["provenance"]["categories_shared_with_model"] is True
+
+
+def test_a_query_over_empty_tables_answers_once_and_says_why(sample_db: Path) -> None:
+    with duckdb.connect(str(sample_db)) as con:
+        con.execute("CREATE TABLE person (id INTEGER, name VARCHAR)")  # no rows, as uploaded
+    gw = ScriptedGateway("List people.", "SELECT * FROM person")
+    events = run(sample_db, gw, "Who are the people?")
+    assert steps(events) == ["schema", "plan", "sql", "result", "critic", "answer"]
+    assert "person has no rows" in events[-1]["text"]
+    assert "model" not in events[4]  # decided without a model call

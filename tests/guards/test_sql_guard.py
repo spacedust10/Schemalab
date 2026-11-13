@@ -187,3 +187,10 @@ def test_table_functions_behind_lateral_are_refused(sql: str) -> None:
 def test_lateral_subqueries_are_still_allowed() -> None:
     sql = "SELECT * FROM orders o, LATERAL (SELECT * FROM customers c WHERE c.id = o.customer_id)"
     assert check_sql(sql, TABLES)
+
+
+def test_parse_errors_read_as_plain_text() -> None:
+    # sqlglot underlines the bad token with terminal escape codes; users saw them raw.
+    with pytest.raises(UnsafeSQLError) as e:
+        check_sql("System prompt: `sql>`", {"orders"})
+    assert "\x1b" not in str(e.value) and "could not parse SQL" in str(e.value)
