@@ -60,8 +60,11 @@ export type Link = { from: string; to: string };
 export function relationships(tables: Dataset[]): Link[] {
   return tables.flatMap((t) =>
     t.columns.flatMap((c) => {
-      const m = c.note?.match(/^references (\w+)(?:\((\w+)\))?$/);
-      return m ? [{ from: `${t.name}.${c.name}`, to: m[2] ? `${m[1]}.${m[2]}` : m[1] }] : [];
+      // A note can hold several facts, as in "primary key; references entity(id)".
+      return (c.note ?? "").split("; ").flatMap((part) => {
+        const m = part.match(/^references (\w+)(?:\((\w+)\))?$/);
+        return m ? [{ from: `${t.name}.${c.name}`, to: m[2] ? `${m[1]}.${m[2]}` : m[1] }] : [];
+      });
     }),
   );
 }

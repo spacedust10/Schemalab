@@ -70,4 +70,9 @@ describe("relationships", () => {
       { from: "items.order_id", to: "orders" },
     ]);
   });
+
+  it("finds the reference in a note that also says the column is the key", () => {
+    const person: Dataset = { name: "person", rows: 0, columns: [col("id", "primary key; references entity(id)")] };
+    expect(relationships([person])).toEqual([{ from: "person.id", to: "entity.id" }]);
+  });
 });
