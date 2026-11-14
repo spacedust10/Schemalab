@@ -5,7 +5,7 @@ import { GET as view } from "../app/api/assignments/[id]/route";
 import { POST as submit } from "../app/api/assignments/[id]/submit/route";
 import { POST as check } from "../app/api/assignments/check/route";
 import { SESSION_COOKIE } from "./api";
-import { scoreLine, validId } from "./assignments";
+import { apiPath, scoreLine, validId } from "./assignments";
 
 describe("assignment helpers", () => {
   it("accepts sample and random ids, nothing else", () => {
@@ -13,6 +13,13 @@ describe("assignment helpers", () => {
     expect(validId("aB3_-xYz9QwErTy0")).toBe(true);
     expect(validId("../auth/me")).toBe(false);
     expect(validId("a".repeat(41))).toBe(false);
+  });
+
+  it("builds API paths only for valid ids, encoded", () => {
+    expect(apiPath("sample:top-paid")).toBe("/api/assignments/sample%3Atop-paid");
+    expect(apiPath("abc123", "submit")).toBe("/api/assignments/abc123/submit");
+    expect(apiPath("../auth/me")).toBeNull();
+    expect(apiPath("x/../../lab/start", "submit")).toBeNull();
   });
 
   it("sums a score up with its parts", () => {

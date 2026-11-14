@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { type AssignmentView, type Grade, scoreLine } from "@/lib/assignments";
+import { type AssignmentView, type Grade, apiPath, scoreLine } from "@/lib/assignments";
 import { fmt } from "@/lib/format";
 import { errorText, postJSON } from "@/lib/post";
 
@@ -14,15 +14,15 @@ export function TakeView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(
-    () =>
-      fetch(`/api/assignments/${id}`).then(async (res) => {
+  const path = apiPath(id); // null for an id that is not one of ours: nothing is requested
+  const load = useCallback(() => {
+    if (!path) return Promise.resolve();
+    return fetch(path).then(async (res) => {
         if (res.status === 401) return router.replace("/login");
         if (!res.ok) return setError(await errorText(res, "Could not load the assignment."));
         setA((await res.json()) as AssignmentView);
-      }),
-    [id, router],
-  );
+      });
+  }, [path, router]);
 
   useEffect(() => {
     load().catch(() => setError("Could not reach the server."));
@@ -32,7 +32,9 @@ export function TakeView({ id }: { id: string }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await postJSON(`/api/assignments/${id}/submit`, { sql });
+      const path = apiPath(id, "submit");
+      if (!path) throw new Error("No such assignment.");
+      const res = await postJSON(path, { sql });
       if (res.status === 401) return router.replace("/login");
       if (!res.ok) throw new Error(await errorText(res, "The answer was not graded."));
       const g = (await res.json()) as Grade;
@@ -45,6 +47,7 @@ export function TakeView({ id }: { id: string }) {
     }
   }
 
+  if (!path) return <main id="main" className="er-page"><p className="alert" role="alert"><strong>Error</strong>No such assignment.</p></main>;
   if (!a) return <main id="main" className="er-page">{error ? <p className="alert" role="alert"><strong>Error</strong>{error}</p> : <p className="hint">Loading…</p>}</main>;
   const out = a.attempts_left === 0;
   return (

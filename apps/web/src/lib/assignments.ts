@@ -37,3 +37,9 @@ export function scoreLine(g: Pick<Grade, "score" | "parts">): string {
   const p = g.parts;
   return `${g.score} of 100: ${p.runs} for running, ${p.columns} for the columns, ${p.rows} for the rows.`;
 }
+
+/** The proxy path for an assignment, or null for an id that is not one of ours. */
+export function apiPath(id: string, action?: "submit"): string | null {
+  if (!validId(id)) return null;
+  return `/api/assignments/${encodeURIComponent(id)}${action ? `/${action}` : ""}`;
+}
