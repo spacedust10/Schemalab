@@ -220,3 +220,33 @@ def test_a_failed_experiment_does_not_echo_connection_details(
     assert resp.status_code == 409
     assert "10.0.0.5" not in resp.text and "password" not in resp.text
     assert "10.0.0.5" not in caplog.text and "password" not in caplog.text  # nor in the logs
+
+
+@needs_postgres
+def test_an_authentication_error_from_the_server_is_not_repeated(
+    lab_client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import psycopg
+
+    from schemalab.lab.session import Lab
+
+    class Diag:
+        message_primary = 'password authentication failed for user "lab_u1" at 10.0.0.5'
+
+    class AuthFailed(psycopg.errors.InvalidPassword):  # SQLSTATE 28P01, from the server
+        @property
+        def diag(self) -> Any:
+            return Diag()
+
+    def broken(self: Lab, name: str, mode: str, slots: Any = None) -> dict[str, Any]:
+        raise AuthFailed("auth")
+
+    headers = register(lab_client)
+    lab_client.post("/lab/start", headers=headers)
+    monkeypatch.setattr(Lab, "pattern", broken)
+    resp = lab_client.post(
+        "/lab/pattern", json={"id": "transfer", "mode": "atomic"}, headers=headers
+    )
+    assert resp.status_code == 409 and "could not finish" in resp.json()["detail"]
+    for text in (resp.text, caplog.text):
+        assert "10.0.0.5" not in text and "lab_u1" not in text

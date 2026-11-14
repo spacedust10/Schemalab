@@ -31,6 +31,9 @@ Session = Literal["A", "B"]
 _labs: dict[int, Lab] = {}
 # Experiments open several connections each; this many may run at once across all users.
 _pattern_slots = threading.BoundedSemaphore(4)
+# SQLSTATE classes about the statement itself: data, integrity, transaction state,
+# rollback (deadlock, serialization), syntax, resources, operator intervention (timeouts).
+_STATEMENT_CLASSES = {"22", "23", "25", "40", "42", "53", "57"}
 logger = logging.getLogger(__name__)
 _labs_lock = threading.Lock()
 
@@ -166,16 +169,14 @@ def pattern(user: UserDep, body: PatternRequest) -> dict[str, Any]:
     except RuntimeError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None  # our own messages
     except psycopg.Error as e:
-        # Only PostgreSQL's own one-line message, in the reply and the log: connection
-        # errors can name hosts and users.
-        primary = getattr(e.diag, "message_primary", None)
+        # The log gets the error's type and SQLSTATE only. The reply repeats PostgreSQL's
+        # message only for statement-level errors; connection and authentication errors
+        # (classes 08 and 28, or none for a client-side failure) can name hosts and users.
         logger.warning(
-            "pattern %s/%s stopped: %s (%s)",
-            body.id,
-            body.mode,
-            primary or type(e).__name__,
-            e.sqlstate,
+            "pattern %s/%s stopped: %s (%s)", body.id, body.mode, type(e).__name__, e.sqlstate
         )
+        statement_level = (e.sqlstate or "")[:2] in _STATEMENT_CLASSES
+        primary = getattr(e.diag, "message_primary", None) if statement_level else None
         detail = primary or "The experiment could not finish."
         raise HTTPException(status.HTTP_409_CONFLICT, f"The experiment stopped: {detail}") from None
 
