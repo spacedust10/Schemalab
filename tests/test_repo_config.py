@@ -127,3 +127,9 @@ def test_api_image_has_a_writable_assignments_cache() -> None:
     # Assignment databases are rebuilt on demand, so the image's own disk is enough.
     dockerfile = (ROOT / "Dockerfile.api").read_text()
     assert "/app/data/assignments" in dockerfile.split("chown app", 1)[1].splitlines()[0]
+
+
+def test_web_image_serves_the_public_folder() -> None:
+    # The scratchpad's DuckDB-WASM files are copied into public/ at build time.
+    dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text()
+    assert "COPY --from=build /app/public ./public" in dockerfile
