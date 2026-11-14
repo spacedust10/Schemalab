@@ -15,12 +15,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import Engine, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError, OperationalError
+from starlette.concurrency import run_in_threadpool
 
 from schemalab import assignments as asg
+from schemalab import canvas
 from schemalab.agent.graph import json_value
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.config import get_settings
@@ -375,3 +377,40 @@ def student_answers(
         for r in _answers(engine, aid)
         if r.email == email.strip().lower()
     ]
+
+
+MAX_EXPORT = 5 * 1024 * 1024  # a Canvas gradebook export for a large course fits easily
+
+
+def _best_scores(engine: Engine, aid: str) -> list[tuple[str, int]]:
+    best: dict[str, int] = {}
+    for r in _answers(engine, aid):
+        best[r.email] = max(best.get(r.email, 0), r.score)
+    return sorted(best.items())
+
+
+@router.get("/{aid}/canvas.csv")
+def canvas_csv(aid: str, user: UserDep, engine: EngineDep) -> Response:
+    a = _owned(engine, aid, user)
+    text, _ = canvas.gradebook(a.title, _best_scores(engine, aid))
+    return Response(
+        text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="canvas-grades.csv"'},
+    )
+
+
+@router.post("/{aid}/canvas.csv")
+async def canvas_csv_matched(
+    aid: str, request: Request, user: UserDep, engine: EngineDep
+) -> dict[str, Any]:
+    """The same CSV, with Canvas IDs filled in from the teacher's own gradebook export (the
+    request body). The export is read here and not kept."""
+    a = await run_in_threadpool(_owned, engine, aid, user)
+    body = await request.body()
+    if len(body) > MAX_EXPORT:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "The export is larger than 5 MB.")
+    export = body.decode("utf-8-sig", errors="replace")
+    scores = await run_in_threadpool(_best_scores, engine, aid)
+    text, unmatched = canvas.gradebook(a.title, scores, export)
+    return {"csv": text, "unmatched": unmatched}

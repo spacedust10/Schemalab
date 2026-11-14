@@ -281,3 +281,66 @@ def test_only_the_owner_sees_the_dashboard_or_answers(client: TestClient) -> Non
     )
     assert resp.status_code == 404
     assert client.get("/assignments/sample:top-paid/dashboard", headers=other).status_code == 404
+
+
+# Canvas grade export
+
+
+def rows_of(text: str) -> list[list[str]]:
+    import csv
+    import io
+
+    return list(csv.reader(io.StringIO(text)))
+
+
+def test_the_canvas_csv_has_the_gradebook_columns_and_best_scores(client: TestClient) -> None:
+    aid, teacher = published(client)
+    ada = register(client, "ada@umich.edu")
+    client.post(f"/assignments/{aid}/submit", json={"sql": WRONG}, headers=ada)
+    client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=ada)
+    resp = client.get(f"/assignments/{aid}/canvas.csv", headers=teacher)
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    assert rows_of(resp.text) == [
+        ["Student", "ID", "SIS User ID", "SIS Login ID", "Section", NEW["title"]],
+        ["Points Possible", "", "", "", "", "100"],
+        ["ada@umich.edu", "", "", "ada@umich.edu", "", "100"],
+    ]
+
+
+def test_a_title_that_looks_like_a_formula_is_defused(client: TestClient) -> None:
+    teacher = register(client, "prof@umich.edu")
+    aid = client.post(
+        "/assignments", json={**NEW, "title": "=HYPERLINK(1)"}, headers=teacher
+    ).json()["id"]
+    header = rows_of(client.get(f"/assignments/{aid}/canvas.csv", headers=teacher).text)[0]
+    assert header[-1] == "'=HYPERLINK(1)"
+
+
+def test_the_teachers_canvas_export_fills_in_canvas_ids(client: TestClient) -> None:
+    aid, teacher = published(client)
+    for email in ("ada@umich.edu", "bob@umich.edu"):
+        client.post(
+            f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=register(client, email)
+        )
+    canvas = (
+        "Student,ID,SIS User ID,SIS Login ID,Section,Homework 1 (77)\n"
+        "    Points Possible,,,,,10\n"
+        '"Lovelace, Ada",501,U1001,ADA@umich.edu,CIS 545 001,9\n'
+        '"Hopper, Grace",502,U1002,grace@umich.edu,CIS 545 001,8\n'
+    )
+    got = client.post(
+        f"/assignments/{aid}/canvas.csv",
+        content=canvas,
+        headers={**teacher, "content-type": "text/csv"},
+    ).json()
+    rows = rows_of(got["csv"])
+    assert rows[2] == ["Lovelace, Ada", "501", "U1001", "ADA@umich.edu", "CIS 545 001", "100"]
+    assert rows[3] == ["bob@umich.edu", "", "", "bob@umich.edu", "", "100"]
+    assert got["unmatched"] == ["bob@umich.edu"]
+
+
+def test_only_the_owner_can_export(client: TestClient) -> None:
+    aid, _ = published(client)
+    other = register(client, "nosy@umich.edu")
+    assert client.get(f"/assignments/{aid}/canvas.csv", headers=other).status_code == 404
