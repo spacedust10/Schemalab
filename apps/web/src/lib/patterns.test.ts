@@ -32,4 +32,14 @@ describe("pattern routes", () => {
     await POST(new NextRequest("http://localhost:3000/api/lab/pattern", { method: "POST", headers, body: "{}" }), params("pattern"));
     expect(calls).toEqual(["http://localhost:8000/lab/patterns", "http://localhost:8000/lab/pattern"]);
   });
+
+  it("forwards the experiment group, and nothing else", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      calls.push(url);
+      return Response.json([]);
+    });
+    await GET(new NextRequest("http://localhost:3000/api/lab/patterns?group=pipelines&x=1", { headers }), params("patterns"));
+    expect(calls).toEqual(["http://localhost:8000/lab/patterns?group=pipelines"]);
+  });
 });

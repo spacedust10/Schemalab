@@ -25,7 +25,9 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   if (!GETS.has(action)) return NextResponse.json({ detail: "Not found." }, { status: 404 });
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return NextResponse.json({ detail: "Not signed in." }, { status: 401 });
-  const session = request.nextUrl.searchParams.get("session");
-  const query = action === "result" && session ? `?${new URLSearchParams({ session })}` : "";
+  // Only the parameter each action takes is passed on.
+  const wanted = action === "result" ? "session" : action === "patterns" ? "group" : null;
+  const value = wanted ? request.nextUrl.searchParams.get(wanted) : null;
+  const query = wanted && value ? `?${new URLSearchParams({ [wanted]: value })}` : "";
   return pass(await upstream(`/lab/${action}${query}`, {}, token));
 }

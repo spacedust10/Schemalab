@@ -6,7 +6,12 @@ import { fmt } from "@/lib/format";
 import { type Pattern, type PatternResult, cell } from "@/lib/patterns";
 import { errorText, postJSON } from "@/lib/post";
 
-export function PatternsView() {
+type Props = { group?: "transactions" | "pipelines"; title?: string; lede?: string };
+
+const DEFAULT_LEDE =
+  "Each experiment runs real concurrent PostgreSQL connections in your lab: first the obvious way, then the pattern that makes it safe. The checks say what an outsider would notice: missing money, double charges, lost edits, missing events.";
+
+export function PatternsView({ group = "transactions", title = "Transaction patterns", lede = DEFAULT_LEDE }: Props) {
   const router = useRouter();
   const [catalog, setCatalog] = useState<Pattern[] | null>(null);
   const [results, setResults] = useState<Record<string, Record<string, PatternResult>>>({});
@@ -15,12 +20,12 @@ export function PatternsView() {
 
   const load = useCallback(
     () =>
-      fetch("/api/lab/patterns").then(async (res) => {
+      fetch(`/api/lab/patterns?group=${group}`).then(async (res) => {
         if (res.status === 401) return router.replace("/login");
         if (!res.ok) return setError(await errorText(res, "Could not load the experiments."));
         setCatalog((await res.json()) as Pattern[]);
       }),
-    [router],
+    [router, group],
   );
 
   useEffect(() => {
@@ -50,12 +55,8 @@ export function PatternsView() {
   return (
     <main id="main" className="er-page">
       <header className="data-head">
-        <h1>Transaction patterns</h1>
-        <p className="lede">
-          Each experiment runs real concurrent PostgreSQL connections in your lab: first the
-          obvious way, then the pattern that makes it safe. The checks say what an outsider
-          would notice: missing money, double charges, lost edits, missing events.
-        </p>
+        <h1>{title}</h1>
+        <p className="lede">{lede}</p>
       </header>
       {busy && <p role="status" className="hint">Running {busy}</p>}
       {error && <p className="alert" role="alert"><strong>Error</strong>{error}</p>}
@@ -122,8 +123,10 @@ export function PatternsView() {
       <section aria-labelledby="patterns-about">
         <h2 id="patterns-about">About these runs</h2>
         <ul className="notes">
-          <li>Three worker connections run at once, as your lab role, with its 30-second statement limit. Each experiment builds its own demo_ tables in your lab schema first.</li>
-          <li>The naive ways pause a few milliseconds between reading and writing, as an application computing a value would; that is what lets the races show up every time.</li>
+          <li>Experiments run as your lab role, with its 30-second statement limit, and build their own demo_ tables in your lab schema first.</li>
+          {group === "transactions" && (
+            <li>Three worker connections run at once. The naive ways pause a few milliseconds between reading and writing, as an application computing a value would; that is what lets the races show up every time.</li>
+          )}
           <li>Results vary a little from run to run; the patterns&apos; checks pass every time.</li>
         </ul>
       </section>
