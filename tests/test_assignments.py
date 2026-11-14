@@ -202,3 +202,13 @@ def test_sql_that_crashes_the_parser_scores_zero_instead_of_escaping(tmp_path: P
     deep = "SELECT " + "(" * 3000 + "1" + ")" * 3000
     got = grade(COURSES, deep, "exam", tmp_path)
     assert got["score"] == 0 and got["error"]["title"]
+
+
+def test_the_schema_lists_only_the_assignments_own_tables(tmp_path: Path) -> None:
+    from schemalab.assignments import database, schema_of
+
+    path = database(tmp_path, COURSES.schema, COURSES.data)
+    assert schema_of(path) == {
+        "grades": ["student_id", "course", "grade"],
+        "students": ["id", "name"],
+    }

@@ -913,6 +913,8 @@ td.tone-medium {
   margin: 0 auto;
   padding: var(--space-6) var(--gutter) var(--space-7);
   display: grid;
+  /* minmax(0, 1fr): a wide table scrolls inside its own box instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
 }
 .er-input {

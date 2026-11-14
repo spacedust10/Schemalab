@@ -70,8 +70,9 @@ def database(cache: Path, schema: str, data: str) -> Path:
 def schema_of(path: Path) -> dict[str, list[str]]:
     with open_readonly(path) as con:
         rows = con.execute(
+            # Not internal: DuckDB also lists its catalog views (duckdb_columns, sqlite_master).
             "SELECT table_name, column_name FROM duckdb_columns() WHERE schema_name = 'main' "
-            "ORDER BY table_name, column_index"
+            "AND NOT internal ORDER BY table_name, column_index"
         ).fetchall()
     out: dict[str, list[str]] = {}
     for table, column in rows:
