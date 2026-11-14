@@ -391,7 +391,16 @@ def star(mode: str, connect: Connect) -> Result:
                 c.execute(statement)
             load_ms = (time.perf_counter() - started) * 1000
             question = _STAR_QUESTION
-        c.execute("ANALYZE")
+        # Only this experiment's tables: a bare ANALYZE would also work through the user's own.
+        c.execute(
+            "ANALYZE demo_order_lines, demo_oltp_orders, demo_products, demo_categories, "
+            "demo_oltp_customers, demo_regions"
+        )
+        if mode == "star":
+            c.execute(
+                "ANALYZE demo_fact_order_lines, demo_dim_date, demo_dim_customer_star, "
+                "demo_dim_product"
+            )
         row = c.execute(sql.SQL("EXPLAIN (FORMAT JSON) ") + sql.SQL(question)).fetchone()
         plan = row[0][0]["Plan"] if row else {}
         tables = {n["Relation Name"] for n in _nodes(plan) if n.get("Relation Name")}

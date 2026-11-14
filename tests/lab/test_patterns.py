@@ -181,3 +181,12 @@ def test_a_star_schema_answers_the_same_with_four_tables(lab: Lab) -> None:
     got = lab.pattern("star", "star")
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert check(got, "Same answer as the source")["actual"] is True
+
+
+def test_experiments_analyze_only_their_own_tables(lab: Lab) -> None:
+    lab.run("A", "CREATE TABLE mine AS SELECT g AS x FROM generate_series(1, 1000) g")
+    lab.pattern("star", "star")
+    out = lab.run(
+        "A", "SELECT last_analyze IS NULL FROM pg_stat_user_tables WHERE relname = 'mine'"
+    )
+    assert out["rows"] == [[True]]
