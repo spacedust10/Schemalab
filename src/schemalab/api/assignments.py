@@ -113,19 +113,27 @@ def _table_rows(path: Path) -> dict[str, Any]:
 
 
 def reserve_attempt(engine: Engine, aid: str, user_id: int, limit: int) -> int | None:
-    """Claim the next attempt slot and return its number, or None when all `limit` are used.
-    Slots are numbered after the highest existing one; two requests that pick the same number
-    at once collide on the key, and the loser looks again."""
+    """Claim the next attempt slot and return its number, or None when none is left.
+
+    The number is one past both the highest slot and the submissions recorded (attempts made
+    before slots existed), and it must not exceed the limit. Each number can be claimed once,
+    so however many requests race, at most `limit` attempts get through; a request that loses
+    a number looks again."""
     for _ in range(limit + 20):
-        if _slots_used(engine, aid, user_id) >= limit:
-            return None
         with engine.connect() as conn:
             highest = conn.execute(
                 select(func.max(attempt_slots.c.attempt_no)).where(
                     attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
                 )
             ).scalar_one()
-        number = (highest or 0) + 1
+            made = conn.execute(
+                select(func.count()).where(
+                    submissions.c.assignment_id == aid, submissions.c.user_id == user_id
+                )
+            ).scalar_one()
+        number = max(highest or 0, int(made)) + 1
+        if number > limit:
+            return None
         try:
             with engine.begin() as conn:
                 conn.execute(
