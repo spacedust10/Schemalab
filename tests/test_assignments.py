@@ -110,3 +110,81 @@ def test_order_counts_only_when_the_assignment_asks_for_it(tmp_path: Path) -> No
     assert got["tests"][0]["passed"] is False and "order" in got["tests"][0]["hint"]
     unordered = grade(COURSES, "SELECT s.name, 1 FROM students s", "tutor", tmp_path)
     assert unordered["parts"]["runs"] == 10
+
+
+# The builder's checks
+
+
+def test_a_sound_assignment_has_no_errors(tmp_path: Path) -> None:
+    from schemalab.assignments import check
+
+    assert check(COURSES, tmp_path) == {"errors": [], "warnings": []}
+
+
+@pytest.mark.parametrize(
+    ("change", "error"),
+    [
+        ({"schema": COURSES.schema + "DROP TABLE grades;"}, "Only CREATE TABLE and INSERT"),
+        ({"schema": "CREATE TABLE Students (ID INT, name TEXT);"}, "lowercase"),
+        ({"reference": "SELECT nme FROM students"}, "reference query fails"),
+        ({"reference": "DELETE FROM students"}, "reference query fails"),
+        ({"ordered": True}, "ORDER BY"),
+    ],
+)
+def test_a_broken_assignment_is_refused_with_the_reason(
+    tmp_path: Path, change: dict[str, object], error: str
+) -> None:
+    from dataclasses import replace
+
+    from schemalab.assignments import check
+
+    got = check(replace(COURSES, **change), tmp_path)  # type: ignore[arg-type]
+    assert any(error in e for e in got["errors"]), got
+
+
+def test_weak_hidden_tests_get_warnings(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from schemalab.assignments import check
+
+    assert any("hidden" in w for w in check(replace(COURSES, hidden=[]), tmp_path)["warnings"])
+    empty = replace(COURSES, hidden=[("Nobody", "INSERT INTO grades VALUES (9, 'DB', 1);")])
+    assert any("no rows" in w for w in check(empty, tmp_path)["warnings"])
+    unordered = replace(COURSES, reference=COURSES.reference + " ORDER BY courses")
+    assert any("order" in w.lower() for w in check(unordered, tmp_path)["warnings"])
+
+
+def test_the_sample_assignments_are_sound(tmp_path: Path) -> None:
+    from schemalab.assignments import SAMPLES, check
+
+    assert len(SAMPLES) >= 3
+    for a in SAMPLES.values():
+        assert check(a, tmp_path)["errors"] == [], a.title
+        assert grade(a, a.reference, "exam", tmp_path)["score"] == 100
+
+
+@pytest.mark.parametrize(
+    ("assignment", "wrong"),
+    [
+        ("courses-per-student", INNER_JOIN),
+        # LIMIT 1 per department drops a tie.
+        (
+            "top-paid",
+            "SELECT dept, name, salary FROM (SELECT *, row_number() OVER "
+            "(PARTITION BY dept ORDER BY salary DESC) AS r FROM employees) t WHERE r = 1",
+        ),
+        # count(email) never counts a NULL; "= NULL" is never true.
+        (
+            "missing-emails",
+            "SELECT count(*) - count(email) AS no_email FROM customers WHERE id < 4",
+        ),
+    ],
+)
+def test_each_sample_catches_a_typical_wrong_answer_only_in_hidden_tests(
+    tmp_path: Path, assignment: str, wrong: str
+) -> None:
+    from schemalab.assignments import SAMPLES
+
+    got = grade(SAMPLES[assignment], wrong, "exam", tmp_path)
+    assert got["tests"][0]["passed"] is True  # it looks right on the sample
+    assert not all(t["passed"] for t in got["tests"][1:])  # a hidden test catches it

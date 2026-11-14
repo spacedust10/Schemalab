@@ -21,11 +21,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 import duckdb
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 from schemalab import uploads
 from schemalab.guards.engine import open_readonly
 from schemalab.guards.run import QueryResult, QueryTimeoutError, run_query
 from schemalab.guards.sql import UnsafeSQLError
+from schemalab.sqldump import ident
 from schemalab.sqlerrors import explain
 
 Mode = Literal["tutor", "exam"]
@@ -187,3 +191,145 @@ def _compare(
         extra=[_plain(r) for r in remaining[:SHOWN_ROWS]],
     )
     return entry
+
+
+# The builder's checks
+
+
+def _setup_problems(a: Assignment) -> list[str]:
+    """Setup may only create tables and insert constants, with names the loader keeps."""
+    problems: list[str] = []
+    texts = [("the schema", a.schema), (SAMPLE.lower(), a.data)]
+    texts += [(f"hidden test {name!r}", data) for name, data in a.hidden]
+    for where, text in texts:
+        try:
+            statements = [s for s in sqlglot.parse(text, read="postgres") if s is not None]
+        except SqlglotError as e:
+            problems.append(f"Could not read {where}: {str(e).splitlines()[0]}")
+            continue
+        for s in statements:
+            table_create = isinstance(s, exp.Create) and s.args.get("kind") == "TABLE"
+            if not (table_create or isinstance(s, exp.Insert)):
+                kind = s.sql(dialect="postgres").split()[0].upper() if s.sql() else "?"
+                problems.append(
+                    f"Only CREATE TABLE and INSERT statements may set up data; {where} has {kind}."
+                )
+            if table_create and isinstance(s.this, exp.Schema):
+                names = [s.this.this.name] + [c.name for c in s.this.find_all(exp.ColumnDef)]
+                for name in names:
+                    if ident(name) != name:
+                        problems.append(
+                            f"Use lowercase names of letters, digits and _ only: {name}."
+                        )
+    return problems
+
+
+def check(a: Assignment, cache: Path) -> dict[str, list[str]]:
+    """What stops the assignment from being published (errors) and what weakens it."""
+    errors = _setup_problems(a)
+    warnings: list[str] = []
+    try:
+        tree = sqlglot.parse_one(a.reference, read="duckdb")
+        sorts = tree.args.get("order") is not None
+    except SqlglotError:
+        sorts = False
+    if a.ordered and not sorts:
+        errors.append("Order is graded, but the reference query has no ORDER BY.")
+    if errors:
+        return {"errors": errors, "warnings": warnings}
+    for name, data in [(SAMPLE, a.data), *a.hidden]:
+        try:
+            path = database(cache, a.schema, data)
+            answer = run_query(path, a.reference)
+        except uploads.UploadError as e:
+            errors.append(f"{name}: {e}")
+            continue
+        except _FAILURES as e:
+            reason = explain(a.reference, str(e), schema_of(path))["title"]
+            errors.append(f"The reference query fails on {name}: {reason}.")
+            continue
+        if name != SAMPLE and not answer.rows:
+            warnings.append(
+                f"{name}: the answer has no rows, so a query that returns nothing passes it."
+            )
+    if not a.hidden:
+        warnings.append(
+            "There are no hidden tests: a query fitted to the sample data gets full marks."
+        )
+    if sorts and not a.ordered:
+        warnings.append(
+            "The reference sorts its rows, but order is not graded; mark the assignment as "
+            "ordered if it matters."
+        )
+    return {"errors": errors, "warnings": warnings}
+
+
+# Ready-made assignments
+
+SAMPLES: dict[str, Assignment] = {
+    "courses-per-student": Assignment(
+        title="Courses per student",
+        prompt="For every student, show their name and how many courses they have taken "
+        "(0 if none). Columns: name, courses.",
+        schema="CREATE TABLE students (id INT PRIMARY KEY, name TEXT);\n"
+        "CREATE TABLE grades (student_id INT, course TEXT, grade INT);",
+        data="INSERT INTO students VALUES (1, 'Ada'), (2, 'Alan');\n"
+        "INSERT INTO grades VALUES (1, 'DB', 90), (1, 'AI', 85), (2, 'DB', 70);",
+        reference="SELECT s.name, count(g.course) AS courses FROM students s "
+        "LEFT JOIN grades g ON g.student_id = s.id GROUP BY s.id, s.name",
+        hidden=[
+            (
+                "A student with no courses",
+                "INSERT INTO students VALUES (1, 'Ada'), (3, 'Grace');\n"
+                "INSERT INTO grades VALUES (1, 'DB', 90);",
+            ),
+            (
+                "Two students with the same name",
+                "INSERT INTO students VALUES (1, 'Sam'), (2, 'Sam');\n"
+                "INSERT INTO grades VALUES (1, 'DB', 90), (2, 'AI', 80), (2, 'DB', 75);",
+            ),
+        ],
+    ),
+    "top-paid": Assignment(
+        title="Top earner per department",
+        prompt="For each department, show the highest-paid employee: department, name and "
+        "salary. If several share the top salary, show all of them.",
+        schema="CREATE TABLE employees (id INT PRIMARY KEY, name TEXT, dept TEXT, salary INT);",
+        data="INSERT INTO employees VALUES (1, 'Ada', 'Eng', 120), (2, 'Alan', 'Eng', 110), "
+        "(3, 'Grace', 'Ops', 90), (4, 'Edsger', 'Ops', 80);",
+        reference="SELECT e.dept, e.name, e.salary FROM employees e WHERE e.salary = "
+        "(SELECT max(x.salary) FROM employees x WHERE x.dept = e.dept)",
+        hidden=[
+            (
+                "A tie for the top salary",
+                "INSERT INTO employees VALUES (1, 'Ada', 'Eng', 120), (2, 'Alan', 'Eng', 120), "
+                "(3, 'Grace', 'Ops', 90);",
+            ),
+            (
+                "A department of one",
+                "INSERT INTO employees VALUES (1, 'Ada', 'Eng', 120), (2, 'Barbara', 'Law', 70), "
+                "(3, 'Alan', 'Eng', 100);",
+            ),
+        ],
+    ),
+    "missing-emails": Assignment(
+        title="Customers without an email",
+        prompt="How many customers have no email on file? One column: no_email.",
+        schema="CREATE TABLE customers (id INT PRIMARY KEY, name TEXT, email TEXT);",
+        data="INSERT INTO customers VALUES (1, 'Ada', 'ada@example.com'), (2, 'Alan', NULL), "
+        "(3, 'Grace', NULL);",
+        reference="SELECT count(*) AS no_email FROM customers WHERE email IS NULL",
+        hidden=[
+            (
+                "Everyone has an email",
+                "INSERT INTO customers VALUES (1, 'Ada', 'ada@example.com'), "
+                "(2, 'Alan', 'alan@example.com');",
+            ),
+            (
+                "Nobody has an email",
+                "INSERT INTO customers VALUES (1, 'Ada', NULL), (2, 'Alan', NULL), "
+                "(3, 'Grace', NULL), (4, 'Edsger', NULL);",
+            ),
+        ],
+    ),
+}
