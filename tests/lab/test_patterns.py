@@ -144,3 +144,15 @@ def test_a_change_log_replays_into_an_exact_replica(lab: Lab) -> None:
     got = lab.pattern("cdc", "change_log")
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert got["stats"]["changes"] > 0
+
+
+def test_one_big_table_reads_every_month_and_keeps_deleted_space(lab: Lab) -> None:
+    got = lab.pattern("partitioning", "one_table")
+    assert check(got, "Rows read to total March")["actual"] == 120_000
+    assert check(got, "January's disk space given back")["actual"] is False
+
+
+def test_monthly_partitions_read_one_month_and_drop_one_cleanly(lab: Lab) -> None:
+    got = lab.pattern("partitioning", "partitioned")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]
+    assert got["stats"]["tables_scanned"] == 1  # one partition of twelve

@@ -7,6 +7,8 @@ checks anyone can read.
 import time
 from typing import Any
 
+from psycopg import sql
+
 from schemalab.lab.patterns import Connect, Result, _check, _mode
 
 # Change data capture
@@ -127,8 +129,102 @@ def _upsert(c: Any, id_: int, name: str, city: str, at: Any) -> None:
     )
 
 
+# Partitioning
+
+_MARCH = (
+    "SELECT sum(amount) FROM demo_sales WHERE sold_on >= DATE '2024-03-01' "
+    "AND sold_on < DATE '2024-04-01'"
+)
+
+
+def partitioning(mode: str, connect: Connect) -> Result:
+    """A year of sales, 10,000 a month: total one month, then retire the oldest month."""
+    with connect() as c:
+        c.execute("DROP TABLE IF EXISTS demo_sales CASCADE")
+        if mode == "partitioned":
+            c.execute(
+                "CREATE TABLE demo_sales (id int, sold_on date NOT NULL, amount numeric NOT NULL) "
+                "PARTITION BY RANGE (sold_on)"
+            )
+            for month in range(1, 13):
+                c.execute(
+                    sql.SQL(
+                        "CREATE TABLE {} PARTITION OF demo_sales FOR VALUES FROM ({}) TO ({})"
+                    ).format(
+                        sql.Identifier(f"demo_sales_2024_{month:02d}"),
+                        sql.Literal(f"2024-{month:02d}-01"),
+                        sql.Literal(f"2024-{month + 1:02d}-01" if month < 12 else "2025-01-01"),
+                    )
+                )
+        else:
+            c.execute(
+                "CREATE TABLE demo_sales (id int, sold_on date NOT NULL, amount numeric NOT NULL)"
+            )
+        c.execute(
+            "INSERT INTO demo_sales SELECT i, DATE '2024-01-01' + "
+            "make_interval(months => i % 12, days => i % 28), (i % 97) + 1 "
+            "FROM generate_series(1, 120000) i"
+        )
+        c.execute("ANALYZE demo_sales")
+
+        started = time.perf_counter()
+        c.execute("SET max_parallel_workers_per_gather = 0")  # one process: plain row counts
+        explain = sql.SQL("EXPLAIN (ANALYZE, FORMAT JSON) ") + sql.SQL(_MARCH)
+        row = c.execute(explain).fetchone()
+        plan = row[0][0]["Plan"] if row else {}
+        scans = [n for n in _nodes(plan) if n.get("Relation Name")]
+        read = sum(
+            round(
+                (n.get("Actual Rows", 0) + n.get("Rows Removed by Filter", 0))
+                * n.get("Actual Loops", 1)
+            )
+            for n in scans
+        )
+        query_ms = (time.perf_counter() - started) * 1000
+
+        before = _size(c)
+        started = time.perf_counter()
+        if mode == "partitioned":
+            c.execute("DROP TABLE demo_sales_2024_01")
+        else:
+            c.execute("DELETE FROM demo_sales WHERE sold_on < DATE '2024-02-01'")
+        retire_ms = (time.perf_counter() - started) * 1000
+        freed = before - _size(c)
+    return {
+        "checks": [
+            _check("Rows read to total March", 10_000, read),
+            _check("January's disk space given back", True, freed > 0),
+        ],
+        "stats": {
+            "tables_scanned": len({n["Relation Name"] for n in scans}),
+            "query_ms": round(query_ms),
+            "retire_ms": round(retire_ms),
+        },
+        "ms": round(query_ms + retire_ms),
+    }
+
+
+def _nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    out, stack = [], [plan]
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        stack.extend(node.get("Plans", []))
+    return out
+
+
+def _size(c: Any) -> int:
+    """Bytes on disk for demo_sales and every partition of it."""
+    row = c.execute(
+        "SELECT coalesce(sum(pg_total_relation_size(relid)), 0) "
+        "FROM pg_partition_tree('demo_sales')"
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
 EXPERIMENTS = {
     "cdc": (cdc, ("polling", "change_log")),
+    "partitioning": (partitioning, ("one_table", "partitioned")),
 }
 
 CATALOG: list[dict[str, Any]] = [
@@ -152,6 +248,25 @@ CATALOG: list[dict[str, Any]] = [
                 "to a change table in the same transaction; each sync applies the changes not "
                 "yet applied, in order. (Production CDC tools such as Debezium read the "
                 "write-ahead log instead.)",
+            ),
+        ],
+    },
+    {
+        "id": "partitioning",
+        "group": "pipelines",
+        "title": "Partitioning",
+        "question": "A year of sales, 10,000 rows a month. How much does totalling March "
+        "read, and does retiring January give its disk space back?",
+        "modes": [
+            _mode(
+                "one_table", "One table", "All rows in one table; January is retired with DELETE."
+            ),
+            _mode(
+                "partitioned",
+                "Monthly partitions",
+                "PARTITION BY RANGE (sold_on), one "
+                "partition per month; the planner skips months a query cannot need, and "
+                "January is retired by dropping its partition.",
             ),
         ],
     },
