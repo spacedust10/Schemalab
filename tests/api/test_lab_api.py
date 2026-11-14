@@ -291,3 +291,18 @@ def test_errors_get_written_messages_never_server_text(
     assert resp.status_code == 409 and expected in resp.json()["detail"].lower()
     for text in (resp.text, caplog.text):
         assert "10.0.0.5" not in text and "lab_u1" not in text
+
+
+def test_experiments_are_listed_by_group(lab_client: TestClient) -> None:
+    headers = register(lab_client)
+    for group in ("transactions", "pipelines"):
+        got = lab_client.get("/lab/patterns", params={"group": group}, headers=headers).json()
+        assert got and all(p["group"] == group for p in got)
+    default = lab_client.get("/lab/patterns", headers=headers).json()
+    assert [p["id"] for p in default] == [
+        "transfer",
+        "idempotency",
+        "optimistic",
+        "outbox",
+        "new_order",
+    ]

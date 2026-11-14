@@ -132,3 +132,15 @@ def test_a_second_run_while_one_is_running_is_refused_at_once(
     release.set()
     first.join(timeout=30)
     assert lab.pattern("transfer", "naive") == {"name": "transfer"}  # free again afterwards
+
+
+def test_polling_a_timestamp_misses_deletes_and_same_instant_changes(lab: Lab) -> None:
+    got = lab.pattern("cdc", "polling")
+    assert check(got, "Deleted rows still in the replica")["actual"] > 0
+    assert check(got, "Replica matches the source")["actual"] is False
+
+
+def test_a_change_log_replays_into_an_exact_replica(lab: Lab) -> None:
+    got = lab.pattern("cdc", "change_log")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]
+    assert got["stats"]["changes"] > 0

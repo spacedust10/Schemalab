@@ -483,6 +483,7 @@ def _mode(id: str, label: str, how: str) -> dict[str, str]:
 CATALOG: list[dict[str, Any]] = [
     {
         "id": "transfer",
+        "group": "transactions",
         "title": "Ledger transfer",
         "question": "Three workers make 60 transfers around three accounts at once. "
         "Is every cent still there?",
@@ -509,6 +510,7 @@ CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "idempotency",
+        "group": "transactions",
         "title": "Idempotency keys",
         "question": "Each of 10 payment requests arrives three times at once, as when a "
         "client retries a slow request. Is each customer charged once?",
@@ -529,6 +531,7 @@ CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "optimistic",
+        "group": "transactions",
         "title": "Optimistic locking",
         "question": "Three editors each add 1 to a product's stock five times, through a "
         "form that holds no lock. Do all 15 edits arrive?",
@@ -548,6 +551,7 @@ CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "outbox",
+        "group": "transactions",
         "title": "Transactional outbox",
         "question": "The application crashes right after every fourth of 20 orders. Does "
         "every order still reach the other services, exactly once?",
@@ -574,6 +578,7 @@ CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "new_order",
+        "group": "transactions",
         "title": "TPC-C New-Order",
         "question": "Three terminals place 60 orders in two districts. Are order numbers "
         "unique and stock exact?",
@@ -608,8 +613,21 @@ def _summary(checks: list[dict[str, Any]]) -> str:
     return f"{len(failed)} of {len(checks)} checks failed. {parts}."
 
 
+def _registry() -> dict[str, tuple[Callable[[str, Connect], Result], tuple[str, ...]]]:
+    from schemalab.lab import pipelines  # imports this module's helpers
+
+    return {**EXPERIMENTS, **pipelines.EXPERIMENTS}
+
+
+def catalog(group: str) -> list[dict[str, Any]]:
+    from schemalab.lab import pipelines
+
+    return [p for p in [*CATALOG, *pipelines.CATALOG] if p["group"] == group]
+
+
 def run(name: str, mode: str, connect: Connect) -> Result:
-    if name not in EXPERIMENTS or mode not in EXPERIMENTS[name][1]:
+    registry = _registry()
+    if name not in registry or mode not in registry[name][1]:
         raise ValueError(f"Unknown experiment {name} or mode {mode}.")
-    result = EXPERIMENTS[name][0](mode, connect)
+    result = registry[name][0](mode, connect)
     return {"name": name, "mode": mode, "summary": _summary(result["checks"]), **result}

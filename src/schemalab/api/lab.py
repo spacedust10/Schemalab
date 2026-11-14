@@ -153,14 +153,17 @@ class PatternRequest(BaseModel):
 
 
 @router.get("/patterns")
-def pattern_list(user: UserDep) -> list[dict[str, Any]]:
-    return patterns.CATALOG
+def pattern_list(
+    user: UserDep, group: Annotated[Literal["transactions", "pipelines"], Query()] = "transactions"
+) -> list[dict[str, Any]]:
+    return patterns.catalog(group)
 
 
 @router.post("/pattern")
 def pattern(user: UserDep, body: PatternRequest) -> dict[str, Any]:
     """Run one transaction-pattern experiment (fixed SQL) in the user's lab."""
-    modes = {p["id"]: [m["id"] for m in p["modes"]] for p in patterns.CATALOG}
+    every = [*patterns.catalog("transactions"), *patterns.catalog("pipelines")]
+    modes = {p["id"]: [m["id"] for m in p["modes"]] for p in every}
     if body.mode not in modes.get(body.id, []):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Choose an experiment and a way to run it."
