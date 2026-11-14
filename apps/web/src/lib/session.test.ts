@@ -156,6 +156,6 @@ describe("cross-site protection", () => {
 describe("proxy matcher", () => {
   it("guards every signed-in page", async () => {
     const { config } = await import("../proxy");
-    expect(config.matcher).toEqual(["/", "/data", "/dashboard", "/normalize", "/er", "/algebra", "/lab", "/theory", "/plans", "/bench", "/patterns", "/pipelines"]);
+    expect(config.matcher).toEqual(["/", "/data", "/dashboard", "/normalize", "/er", "/algebra", "/lab", "/theory", "/plans", "/bench", "/patterns", "/pipelines", "/assignments", "/assignments/:id"]);
   });
 });
