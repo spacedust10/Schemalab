@@ -227,3 +227,57 @@ def test_only_a_failure_on_our_side_gives_the_attempt_back(
     # The first failure gave the attempt back; the second did not, so none is left.
     resp = client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
     assert resp.status_code == 409
+
+
+# The teacher's dashboard
+
+WRONG_NO_EMAIL = "SELECT count(*) AS no_email FROM customers WHERE email = NULL"
+
+
+def published(client: TestClient, attempts: int = 5) -> tuple[str, dict[str, str]]:
+    teacher = register(client, "prof@umich.edu")
+    aid = client.post(
+        "/assignments", json={**NEW, "max_attempts": attempts}, headers=teacher
+    ).json()["id"]
+    return aid, teacher
+
+
+def test_the_dashboard_sums_up_students_scores_and_tests(client: TestClient) -> None:
+    aid, teacher = published(client)
+    ada, bob = register(client, "ada@umich.edu"), register(client, "bob@umich.edu")
+    client.post(f"/assignments/{aid}/submit", json={"sql": WRONG_NO_EMAIL}, headers=ada)
+    client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=ada)
+    client.post(f"/assignments/{aid}/submit", json={"sql": WRONG}, headers=bob)
+
+    got = client.get(f"/assignments/{aid}/dashboard", headers=teacher).json()
+    students = {s["email"]: s for s in got["students"]}
+    assert students["ada@umich.edu"]["attempts"] == 2 and students["ada@umich.edu"]["best"] == 100
+    assert students["ada@umich.edu"]["latest"] == 100 and students["ada@umich.edu"]["last_at"]
+    assert students["bob@umich.edu"]["best"] == students["bob@umich.edu"]["latest"] < 100
+    assert got["summary"]["students"] == 2 and got["summary"]["submissions"] == 3
+    # Pass rates over each student's latest answer: Ada passes both, Bob only the sample.
+    assert got["tests"] == [
+        {"name": "Sample data", "passed": 2, "of": 2},
+        {"name": "Everyone is missing an email", "passed": 1, "of": 2},
+    ]
+
+
+def test_a_students_answers_are_listed_for_the_owner(client: TestClient) -> None:
+    aid, teacher = published(client)
+    ada = register(client, "ada@umich.edu")
+    client.post(f"/assignments/{aid}/submit", json={"sql": WRONG}, headers=ada)
+    got = client.get(
+        f"/assignments/{aid}/submissions", params={"email": "ada@umich.edu"}, headers=teacher
+    ).json()
+    assert [s["sql"] for s in got] == [WRONG] and got[0]["score"] < 100
+
+
+def test_only_the_owner_sees_the_dashboard_or_answers(client: TestClient) -> None:
+    aid, _ = published(client)
+    other = register(client, "nosy@umich.edu")
+    assert client.get(f"/assignments/{aid}/dashboard", headers=other).status_code == 404
+    resp = client.get(
+        f"/assignments/{aid}/submissions", params={"email": "ada@umich.edu"}, headers=other
+    )
+    assert resp.status_code == 404
+    assert client.get("/assignments/sample:top-paid/dashboard", headers=other).status_code == 404

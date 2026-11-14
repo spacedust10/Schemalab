@@ -108,6 +108,14 @@ submissions = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+submission_tests = Table(
+    "submission_tests",
+    metadata,
+    # Which tests a submission passed, for the teacher's per-test pass rates.
+    Column("submission_id", ForeignKey("submissions.id", ondelete="CASCADE"), primary_key=True),
+    Column("tests", JSON, nullable=False),  # [{"name": ..., "passed": ...}]
+)
+
 attempt_slots = Table(
     "attempt_slots",
     metadata,

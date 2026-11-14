@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import Engine, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -25,7 +25,7 @@ from schemalab.agent.graph import json_value
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.config import get_settings
 from schemalab.guards.engine import open_readonly
-from schemalab.store import assignments, attempt_slots, submissions
+from schemalab.store import assignments, attempt_slots, submission_tests, submissions, users
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 SAMPLE_ROWS = 50
@@ -266,13 +266,21 @@ def submit(
             _release(engine, aid, user["id"], slot)
         raise
     with engine.begin() as conn:
-        conn.execute(
-            insert(submissions).values(
+        submission_id = conn.execute(
+            insert(submissions)
+            .values(
                 assignment_id=aid,
                 user_id=user["id"],
                 sql=body.sql,
                 score=result["score"],
                 created_at=datetime.now(UTC),
+            )
+            .returning(submissions.c.id)
+        ).scalar_one()
+        conn.execute(
+            insert(submission_tests).values(
+                submission_id=submission_id,
+                tests=[{"name": t["name"], "passed": t["passed"]} for t in result["tests"]],
             )
         )
     _, best = _attempts(engine, aid, user["id"])
@@ -280,3 +288,90 @@ def submit(
     result["attempts_left"] = None if limit is None else max(0, limit - used)
     result["best"] = best
     return result
+
+
+# The owner's view
+
+
+def _owned(engine: Engine, aid: str, user: dict[str, Any]) -> asg.Assignment:
+    """The assignment if the caller created it; 404 otherwise, so others learn nothing."""
+    if aid.startswith("sample:"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such assignment.")
+    a, _, _, owner = _found(engine, aid)
+    if owner != user["id"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such assignment.")
+    return a
+
+
+def _answers(engine: Engine, aid: str) -> list[Any]:
+    with engine.connect() as conn:
+        return list(
+            conn.execute(
+                select(
+                    users.c.email,
+                    submissions.c.id,
+                    submissions.c.score,
+                    submissions.c.sql,
+                    submissions.c.created_at,
+                    submission_tests.c.tests,
+                )
+                .join(users, users.c.id == submissions.c.user_id)
+                .outerjoin(submission_tests, submission_tests.c.submission_id == submissions.c.id)
+                .where(submissions.c.assignment_id == aid)
+                .order_by(submissions.c.created_at, submissions.c.id)
+            ).all()
+        )
+
+
+@router.get("/{aid}/dashboard")
+def dashboard(aid: str, user: UserDep, engine: EngineDep) -> dict[str, Any]:
+    a = _owned(engine, aid, user)
+    rows = _answers(engine, aid)
+    by_student: dict[str, list[Any]] = {}
+    for row in rows:
+        by_student.setdefault(row.email, []).append(row)
+    students = []
+    for email, mine in sorted(by_student.items()):
+        latest = mine[-1]
+        students.append(
+            {
+                "email": email,
+                "attempts": len(mine),
+                "best": max(r.score for r in mine),
+                "latest": latest.score,
+                "last_at": latest.created_at.isoformat(),
+            }
+        )
+    # Pass rates over each student's latest answer that recorded its tests.
+    latest_tests = [mine[-1].tests for mine in by_student.values() if mine[-1].tests]
+    tests = [
+        {
+            "name": name,
+            "passed": sum(
+                1 for t in latest_tests if any(x["name"] == name and x["passed"] for x in t)
+            ),
+            "of": len(latest_tests),
+        }
+        for name in [asg.SAMPLE, *[n for n, _ in a.hidden]]
+    ]
+    best = sorted(s["best"] for s in students)
+    middle = len(best) // 2
+    summary: dict[str, Any] = {"students": len(students), "submissions": len(rows)}
+    if best:
+        median = best[middle] if len(best) % 2 else (best[middle - 1] + best[middle]) / 2
+        summary.update(
+            mean=round(sum(best) / len(best), 1), median=median, min=best[0], max=best[-1]
+        )
+    return {"title": a.title, "students": students, "tests": tests, "summary": summary}
+
+
+@router.get("/{aid}/submissions")
+def student_answers(
+    aid: str, user: UserDep, engine: EngineDep, email: Annotated[str, Query(max_length=254)]
+) -> list[dict[str, Any]]:
+    _owned(engine, aid, user)
+    return [
+        {"sql": r.sql, "score": r.score, "at": r.created_at.isoformat()}
+        for r in _answers(engine, aid)
+        if r.email == email.strip().lower()
+    ]
