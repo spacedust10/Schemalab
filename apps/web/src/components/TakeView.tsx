@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { type AssignmentView, type Grade, apiPath, scoreLine } from "@/lib/assignments";
 import { fmt } from "@/lib/format";
 import { errorText, postJSON } from "@/lib/post";
+import Link from "next/link";
+import { ScratchPad } from "./ScratchPad";
 
 export function TakeView({ id }: { id: string }) {
   const router = useRouter();
@@ -62,6 +64,10 @@ export function TakeView({ id }: { id: string }) {
           {a.best !== null && ` Your best score so far: ${a.best}.`}
           {a.ordered && " Row order counts."}
         </p>
+        <p className="hint">Your email, your answers and your scores are visible to this assignment&apos;s creator.</p>
+        {a.reference !== undefined && (
+          <p><Link href={`/assignments/${encodeURIComponent(a.id)}/dashboard`} prefetch={false}>Open the dashboard for this assignment</Link></p>
+        )}
       </header>
 
       <section aria-labelledby="take-data">
@@ -78,6 +84,8 @@ export function TakeView({ id }: { id: string }) {
         ))}
         <p className="hint">Graded on this sample and on {a.tests.length - 1} hidden database{a.tests.length === 2 ? "" : "s"}: {a.tests.slice(1).join("; ")}.</p>
       </section>
+
+      <ScratchPad tables={a.tables} starter={`SELECT * FROM ${Object.keys(a.tables)[0] ?? "..."} LIMIT 10`} />
 
       <section aria-labelledby="take-answer">
         <h2 id="take-answer">Your answer</h2>
