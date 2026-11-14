@@ -156,3 +156,17 @@ def test_monthly_partitions_read_one_month_and_drop_one_cleanly(lab: Lab) -> Non
     got = lab.pattern("partitioning", "partitioned")
     assert all(c["ok"] for c in got["checks"]), got["checks"]
     assert got["stats"]["tables_scanned"] == 1  # one partition of twelve
+
+
+def test_overwriting_a_customers_state_moves_past_sales(lab: Lab) -> None:
+    got = lab.pattern("scd2", "overwrite")
+    assert (
+        check(got, "Q1 revenue in Michigan")["actual"] == 50
+    )  # Ada's January and February sales moved to Ohio
+    assert check(got, "Q1 revenue in Ohio")["actual"] == 670
+    assert check(got, "Versions of Ada kept")["actual"] == 1
+
+
+def test_type_2_rows_keep_each_sale_where_it_happened(lab: Lab) -> None:
+    got = lab.pattern("scd2", "type2")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]

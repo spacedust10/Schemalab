@@ -222,9 +222,90 @@ def _size(c: Any) -> int:
     return int(row[0]) if row else 0
 
 
+# Slowly changing dimension, Type 2
+
+# (customer, day, amount), loaded in date order; Ada moves from MI to OH on March 1.
+_SALES = [
+    ("ada", "2024-01-10", 100),
+    ("ada", "2024-02-12", 200),
+    ("grace", "2024-02-20", 50),
+    ("alan", "2024-03-05", 70),
+    ("ada", "2024-03-15", 300),
+]
+_MOVE_ON = "2024-03-01"
+
+
+def scd2(mode: str, connect: Connect) -> Result:
+    """Load a quarter of sales into a fact table while one customer moves state."""
+    with connect() as c:
+        c.execute("DROP TABLE IF EXISTS demo_fact_sales, demo_dim_customer")
+        c.execute(
+            "CREATE TABLE demo_dim_customer (customer_key serial PRIMARY KEY, "
+            "customer_id text NOT NULL, state text NOT NULL, valid_from date NOT NULL, "
+            "valid_to date, is_current boolean NOT NULL DEFAULT true)"
+        )
+        c.execute(
+            "CREATE TABLE demo_fact_sales (customer_key int NOT NULL "
+            "REFERENCES demo_dim_customer, sold_on date NOT NULL, amount int NOT NULL)"
+        )
+        c.execute(
+            "INSERT INTO demo_dim_customer (customer_id, state, valid_from) VALUES "
+            "('ada', 'MI', '2024-01-01'), ('grace', 'MI', '2024-01-01'), "
+            "('alan', 'OH', '2024-01-01')"
+        )
+        started = time.perf_counter()
+        moved = False
+        for customer, day, amount in _SALES:
+            if not moved and day >= _MOVE_ON:
+                _move_ada(c, mode)
+                moved = True
+            # A sale points at the customer's version that is current when it is loaded.
+            c.execute(
+                "INSERT INTO demo_fact_sales SELECT customer_key, %s, %s FROM demo_dim_customer "
+                "WHERE customer_id = %s AND is_current",
+                [day, amount, customer],
+            )
+        by_state = dict(
+            c.execute(
+                "SELECT d.state, sum(f.amount) FROM demo_fact_sales f "
+                "JOIN demo_dim_customer d USING (customer_key) GROUP BY d.state"
+            ).fetchall()
+        )
+        row = c.execute(
+            "SELECT count(*) FROM demo_dim_customer WHERE customer_id = 'ada'"
+        ).fetchone()
+        versions = row[0] if row else 0
+    return {
+        "checks": [
+            _check("Q1 revenue in Michigan", 350, int(by_state.get("MI", 0))),
+            _check("Q1 revenue in Ohio", 370, int(by_state.get("OH", 0))),
+            _check("Versions of Ada kept", 2, versions),
+        ],
+        "stats": {"sales": len(_SALES), "customers": 3},
+        "ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
+def _move_ada(c: Any, mode: str) -> None:
+    if mode == "overwrite":  # Type 1: the row now says OH, for every sale it ever had
+        c.execute("UPDATE demo_dim_customer SET state = 'OH' WHERE customer_id = 'ada'")
+        return
+    # Type 2: close the current version and add a new one from the day of the move.
+    c.execute(
+        "UPDATE demo_dim_customer SET valid_to = %s, is_current = false "
+        "WHERE customer_id = 'ada' AND is_current",
+        [_MOVE_ON],
+    )
+    c.execute(
+        "INSERT INTO demo_dim_customer (customer_id, state, valid_from) VALUES ('ada', 'OH', %s)",
+        [_MOVE_ON],
+    )
+
+
 EXPERIMENTS = {
     "cdc": (cdc, ("polling", "change_log")),
     "partitioning": (partitioning, ("one_table", "partitioned")),
+    "scd2": (scd2, ("overwrite", "type2")),
 }
 
 CATALOG: list[dict[str, Any]] = [
@@ -267,6 +348,28 @@ CATALOG: list[dict[str, Any]] = [
                 "PARTITION BY RANGE (sold_on), one "
                 "partition per month; the planner skips months a query cannot need, and "
                 "January is retired by dropping its partition.",
+            ),
+        ],
+    },
+    {
+        "id": "scd2",
+        "group": "pipelines",
+        "title": "Slowly changing dimension",
+        "question": "Ada moves from Michigan to Ohio on March 1, between her sales. Is Q1 "
+        "revenue by state still right afterwards?",
+        "modes": [
+            _mode(
+                "overwrite",
+                "Overwrite (Type 1)",
+                "The customer row's state is updated in "
+                "place; every sale joined to it now reads the new state.",
+            ),
+            _mode(
+                "type2",
+                "Versioned rows (Type 2)",
+                "The current row is closed with valid_to "
+                "and a new version starts; each sale keeps the key of the version current "
+                "when it was loaded.",
             ),
         ],
     },
