@@ -121,3 +121,9 @@ def test_api_image_ships_the_tpc_extensions_and_a_bench_volume() -> None:
     compose = load("docker-compose.yml")
     assert "bench:/app/data/bench" in compose["services"]["api"]["volumes"]
     assert "bench" in compose["volumes"]
+
+
+def test_api_image_has_a_writable_assignments_cache() -> None:
+    # Assignment databases are rebuilt on demand, so the image's own disk is enough.
+    dockerfile = (ROOT / "Dockerfile.api").read_text()
+    assert "/app/data/assignments" in dockerfile.split("chown app", 1)[1].splitlines()[0]

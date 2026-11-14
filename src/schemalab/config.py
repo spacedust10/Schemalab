@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     lab_admin_dsn: str = ""
     # Generated TPC-H/TPC-DS DuckDB files and saved benchmark results.
     bench_dir: str = "data/bench"
+    # DuckDB files built from assignments' sample and hidden data; a cache, safe to delete.
+    assignments_dir: str = "data/assignments"
     # Any signed-in user may run the benchmarks at scale 0.01; larger scales take minutes of
     # server time, so only these accounts (emails) may start them.
     bench_operators: list[str] = []

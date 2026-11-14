@@ -99,6 +99,8 @@ _FAILURES = (UnsafeSQLError, QueryTimeoutError, duckdb.Error)
 
 
 def grade(a: Assignment, sql: str, mode: Mode, cache: Path) -> dict[str, Any]:
+    if mode not in ("tutor", "exam"):
+        raise ValueError(f"Unknown grading mode {mode!r}.")
     tests = [(SAMPLE, a.data), *a.hidden]
     paths = [(name, database(cache, a.schema, data)) for name, data in tests]
     sample = paths[0][1]
@@ -166,7 +168,7 @@ def _compare(
         got == want if ordered else sorted(got, key=repr) == sorted(want, key=repr)
     )
     entry: dict[str, Any] = {"name": name, "passed": same}
-    if same or mode == "exam":
+    if same or mode != "tutor":  # hidden rows show in tutor mode only, never by default
         return entry
     if not same_width:
         hint = "Your query returns a different number of columns than the answer."

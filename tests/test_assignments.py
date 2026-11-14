@@ -188,3 +188,11 @@ def test_each_sample_catches_a_typical_wrong_answer_only_in_hidden_tests(
     got = grade(SAMPLES[assignment], wrong, "exam", tmp_path)
     assert got["tests"][0]["passed"] is True  # it looks right on the sample
     assert not all(t["passed"] for t in got["tests"][1:])  # a hidden test catches it
+
+
+@pytest.mark.parametrize("mode", ["Exam", "", "teacher"])
+def test_an_unknown_mode_is_refused_rather_than_shown_hidden_rows(
+    tmp_path: Path, mode: str
+) -> None:
+    with pytest.raises(ValueError, match="mode"):
+        grade(COURSES, INNER_JOIN, mode, tmp_path)  # type: ignore[arg-type]

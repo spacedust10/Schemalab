@@ -1,0 +1,111 @@
+"""/assignments: build, share, take and grade SQL assignments. Hidden data stays hidden."""
+
+from typing import Any
+
+from fastapi.testclient import TestClient
+
+from tests.conftest import register
+
+SECRET = "Zzyzx"  # a name that only the hidden test contains
+
+NEW: dict[str, Any] = {
+    "title": "Customers without an email",
+    "prompt": "How many customers have no email? One column: no_email.",
+    "schema": "CREATE TABLE customers (id INT PRIMARY KEY, name TEXT, email TEXT);",
+    "data": "INSERT INTO customers VALUES (1, 'Ada', NULL), (2, 'Alan', 'a@x.org');",
+    "reference": "SELECT count(*) AS no_email FROM customers WHERE email IS NULL",
+    "hidden": [
+        {
+            "name": "Everyone is missing an email",
+            "data": f"INSERT INTO customers VALUES (1, '{SECRET}', NULL), (2, 'Bo', NULL);",
+        }
+    ],
+    "mode": "exam",
+    "max_attempts": 2,
+}
+RIGHT = NEW["reference"]
+WRONG = "SELECT count(*) AS no_email FROM customers WHERE id = 1"
+
+
+def test_assignments_need_sign_in(client: TestClient) -> None:
+    assert client.get("/assignments").status_code == 401
+    assert (
+        client.post("/assignments/sample:top-paid/submit", json={"sql": "SELECT 1"}).status_code
+        == 401
+    )
+
+
+def test_the_samples_are_listed_without_answers(client: TestClient) -> None:
+    got = client.get("/assignments", headers=register(client)).json()
+    ids = [a["id"] for a in got]
+    assert {"sample:courses-per-student", "sample:top-paid", "sample:missing-emails"} <= set(ids)
+    assert all("reference" not in a and "hidden" not in a for a in got)
+
+
+def test_a_student_sees_the_prompt_schema_and_sample_rows_only(client: TestClient) -> None:
+    got = client.get("/assignments/sample:courses-per-student", headers=register(client)).json()
+    assert got["prompt"] and "CREATE TABLE students" in got["schema"]
+    assert got["tables"]["students"]["rows"] == [[1, "Ada"], [2, "Alan"]]
+    assert "reference" not in got and "hidden" not in got
+    assert got["tests"] == [
+        "Sample data",
+        "A student with no courses",
+        "Two students with the same name",
+    ]
+
+
+def test_submitting_to_a_sample_grades_in_tutor_mode(client: TestClient) -> None:
+    headers = register(client)
+    got = client.post(
+        "/assignments/sample:courses-per-student/submit",
+        json={
+            "sql": "SELECT s.name, count(*) AS courses FROM students s JOIN grades g "
+            "ON g.student_id = s.id GROUP BY s.id, s.name"
+        },
+        headers=headers,
+    ).json()
+    assert got["score"] == 77 and any("hint" in t for t in got["tests"])
+
+
+def test_a_broken_assignment_is_refused_with_its_reasons(client: TestClient) -> None:
+    bad = {**NEW, "reference": "SELECT nme FROM customers"}
+    resp = client.post("/assignments", json=bad, headers=register(client))
+    assert resp.status_code == 400
+    assert any("reference query fails" in e for e in resp.json()["detail"]["errors"])
+
+
+def test_check_previews_without_saving(client: TestClient) -> None:
+    headers = register(client)
+    got = client.post("/assignments/check", json={**NEW, "hidden": []}, headers=headers).json()
+    assert got["errors"] == [] and any("hidden" in w for w in got["warnings"])
+    assert all(
+        a["id"].startswith("sample:") for a in client.get("/assignments", headers=headers).json()
+    )
+
+
+def test_an_exam_hides_answers_limits_attempts_and_keeps_the_best_score(client: TestClient) -> None:
+    teacher = register(client, "teacher@umich.edu")
+    made = client.post("/assignments", json=NEW, headers=teacher)
+    assert made.status_code == 201
+    aid = made.json()["id"]
+    assert len(aid) >= 12  # not guessable from other assignments' ids
+
+    student = register(client, "student@umich.edu")
+    seen = client.get(f"/assignments/{aid}", headers=student).json()
+    assert "reference" not in seen and SECRET not in str(seen)
+    assert seen["mode"] == "exam" and seen["attempts_left"] == 2
+
+    first = client.post(f"/assignments/{aid}/submit", json={"sql": WRONG}, headers=student).json()
+    assert first["score"] < 100 and SECRET not in str(first)
+    assert first["attempts_left"] == 1
+    second = client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student).json()
+    assert second["score"] == 100 and second["best"] == 100 and second["attempts_left"] == 0
+    third = client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
+    assert third.status_code == 409 and "attempts" in third.json()["detail"]
+
+    owner_view = client.get(f"/assignments/{aid}", headers=teacher).json()
+    assert owner_view["reference"] == RIGHT and owner_view["hidden"][0]["data"].count(SECRET) == 1
+
+
+def test_an_unknown_assignment_is_404(client: TestClient) -> None:
+    assert client.get("/assignments/nope", headers=register(client)).status_code == 404

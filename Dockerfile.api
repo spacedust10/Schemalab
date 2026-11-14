@@ -12,7 +12,8 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 1000 app \
-    && mkdir -p /app/data/uploads /app/data/bench && chown app /app/data/uploads /app/data/bench
+    && mkdir -p /app/data/uploads /app/data/bench /app/data/assignments \
+    && chown app /app/data/uploads /app/data/bench /app/data/assignments
 USER app
 ENV PATH=/opt/venv/bin:$PATH
 # The benchmark's data generators, installed now so nothing downloads at run time.

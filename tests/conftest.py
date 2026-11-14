@@ -38,6 +38,9 @@ def app(engine: Engine, sample_db: Path, tmp_path: Path) -> FastAPI:
     application.dependency_overrides[get_engine] = lambda: engine
     application.dependency_overrides[get_db_path] = lambda: sample_db
     application.dependency_overrides[get_uploads_dir] = lambda: tmp_path / "uploads"
+    from schemalab.api.assignments import get_assignments_dir
+
+    application.dependency_overrides[get_assignments_dir] = lambda: tmp_path / "assignments"
     return application
 
 

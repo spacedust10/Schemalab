@@ -15,6 +15,7 @@ from sqlalchemy import Engine
 from schemalab import __version__, store
 from schemalab.agent.graph import run_agent
 from schemalab.api.algebra import router as algebra_router
+from schemalab.api.assignments import router as assignments_router
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
 from schemalab.api.bench import router as bench_router
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(lab_router)
     app.include_router(theory_router)
     app.include_router(bench_router)
+    app.include_router(assignments_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

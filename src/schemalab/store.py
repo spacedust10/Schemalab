@@ -85,6 +85,29 @@ pins = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+assignments = Table(
+    "assignments",
+    metadata,
+    Column("id", String(40), primary_key=True),  # random, so a link cannot be guessed
+    Column("owner_id", ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("spec", JSON, nullable=False),  # title, prompt, setup, reference, hidden tests
+    Column("mode", String(10), nullable=False),  # tutor or exam
+    Column("max_attempts", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+submissions = Table(
+    "submissions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    # Not a foreign key: built-in samples have ids like sample:top-paid.
+    Column("assignment_id", String(40), nullable=False, index=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("sql", Text, nullable=False),
+    Column("score", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 login_attempts = Table(
     "login_attempts",
     metadata,
