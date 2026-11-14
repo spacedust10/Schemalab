@@ -6,6 +6,7 @@ fixed number of attempts and never see hidden rows.
 """
 
 import secrets
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import Engine, func, insert, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.concurrency import run_in_threadpool
 
 from schemalab import assignments as asg
@@ -21,7 +23,7 @@ from schemalab.agent.graph import json_value
 from schemalab.api.auth import UserDep, get_engine
 from schemalab.config import get_settings
 from schemalab.guards.engine import open_readonly
-from schemalab.store import assignments, submissions
+from schemalab.store import assignments, attempt_slots, submissions
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 SAMPLE_ROWS = 50
@@ -94,14 +96,57 @@ def _attempts(engine: Engine, aid: str, user_id: int) -> tuple[int, int | None]:
 
 
 def _sample_tables(a: asg.Assignment, cache: Path) -> dict[str, Any]:
-    path = asg.database(cache, a.schema, a.data)
+    return _table_rows(asg.database(cache, a.schema, a.data))
+
+
+def _table_rows(path: Path) -> dict[str, Any]:
     out: dict[str, Any] = {}
     with open_readonly(path) as con:
         for table, columns in asg.schema_of(path).items():
-            # Trusted: names come from the catalog of a database built from checked setup.
-            rows = con.execute(f'SELECT * FROM "{table}" LIMIT {SAMPLE_ROWS}').fetchall()  # noqa: S608
+            # Names come from the catalog; quoted and escaped all the same.
+            quoted = '"' + table.replace('"', '""') + '"'
+            rows = con.execute(f"SELECT * FROM {quoted} LIMIT {SAMPLE_ROWS}").fetchall()  # noqa: S608
             out[table] = {"columns": columns, "rows": [[json_value(v) for v in r] for r in rows]}
     return out
+
+
+def reserve_attempt(engine: Engine, aid: str, user_id: int, limit: int) -> bool:
+    """Claim the next attempt slot, or False when all `limit` are taken. Two requests that
+    count at the same moment try the same slot; the key lets one through and the other counts
+    again."""
+    for _ in range(limit + 20):
+        with engine.connect() as conn:
+            used = conn.execute(
+                select(func.count()).where(
+                    attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
+                )
+            ).scalar_one()
+        if used >= limit:
+            return False
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    insert(attempt_slots).values(
+                        assignment_id=aid, user_id=user_id, attempt_no=used + 1
+                    )
+                )
+            return True
+        except IntegrityError:
+            continue  # another request took that slot first
+        except OperationalError:
+            time.sleep(0.02)  # SQLite busy with another writer
+    return False
+
+
+def _slots_used(engine: Engine, aid: str, user_id: int) -> int:
+    with engine.connect() as conn:
+        return int(
+            conn.execute(
+                select(func.count()).where(
+                    attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
+                )
+            ).scalar_one()
+        )
 
 
 @router.get("")
@@ -152,7 +197,8 @@ async def create(
 @router.get("/{aid}")
 async def view(aid: str, user: UserDep, engine: EngineDep, cache: CacheDir) -> dict[str, Any]:
     a, mode, limit, owner = _found(engine, aid)
-    used, best = _attempts(engine, aid, user["id"])
+    _, best = _attempts(engine, aid, user["id"])
+    used = _slots_used(engine, aid, user["id"])
     out: dict[str, Any] = {
         "id": aid,
         "title": a.title,
@@ -179,8 +225,7 @@ async def submit(
     aid: str, body: Submission, user: UserDep, engine: EngineDep, cache: CacheDir
 ) -> dict[str, Any]:
     a, mode, limit, _ = _found(engine, aid)
-    used, _ = _attempts(engine, aid, user["id"])
-    if limit is not None and used >= limit:
+    if limit is not None and not reserve_attempt(engine, aid, user["id"], limit):
         raise HTTPException(status.HTTP_409_CONFLICT, f"No attempts left (the limit is {limit}).")
     result = await run_in_threadpool(asg.grade, a, body.sql, mode, cache)  # type: ignore[arg-type]
     with engine.begin() as conn:
@@ -193,7 +238,8 @@ async def submit(
                 created_at=datetime.now(UTC),
             )
         )
-    used, best = _attempts(engine, aid, user["id"])
+    _, best = _attempts(engine, aid, user["id"])
+    used = _slots_used(engine, aid, user["id"])
     result["attempts_left"] = None if limit is None else max(0, limit - used)
     result["best"] = best
     return result

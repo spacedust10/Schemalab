@@ -108,6 +108,16 @@ submissions = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+attempt_slots = Table(
+    "attempt_slots",
+    metadata,
+    # One row per exam attempt, claimed before grading. The key makes two requests that
+    # count the same attempts at once collide instead of both getting through.
+    Column("assignment_id", String(40), primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("attempt_no", Integer, primary_key=True),
+)
+
 login_attempts = Table(
     "login_attempts",
     metadata,

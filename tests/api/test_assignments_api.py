@@ -109,3 +109,41 @@ def test_an_exam_hides_answers_limits_attempts_and_keeps_the_best_score(client: 
 
 def test_an_unknown_assignment_is_404(client: TestClient) -> None:
     assert client.get("/assignments/nope", headers=register(client)).status_code == 404
+
+
+def test_sample_rows_quote_odd_table_names_safely(tmp_path: Any) -> None:
+    import duckdb
+
+    from schemalab.api.assignments import _table_rows
+
+    path = tmp_path / "odd.duckdb"
+    with duckdb.connect(str(path)) as con:
+        con.execute('CREATE TABLE "a""b; DROP TABLE x; --" (v INT)')
+        con.execute('INSERT INTO "a""b; DROP TABLE x; --" VALUES (1)')
+        con.execute("CREATE TABLE x (v INT)")
+    got = _table_rows(path)
+    assert got['a"b; DROP TABLE x; --']["rows"] == [[1]] and "x" in got
+
+
+def test_exam_attempts_cannot_be_raced_past_the_limit(tmp_path: Any) -> None:
+    import threading
+
+    from schemalab.api.assignments import reserve_attempt
+    from schemalab.store import create_user, make_engine
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    with engine.begin() as conn:
+        uid = create_user(conn, "racer@umich.edu", "correct horse battery")
+    wins: list[bool] = []
+    start = threading.Barrier(6)
+
+    def go() -> None:
+        start.wait()
+        wins.append(reserve_attempt(engine, "exam1", uid, limit=2))
+
+    threads = [threading.Thread(target=go) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert sorted(wins) == [False] * 4 + [True] * 2
