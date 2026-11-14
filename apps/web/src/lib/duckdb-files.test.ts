@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DUCKDB_FILES, DUCKDB_VERSION } from "./duckdb-files";
@@ -16,6 +17,7 @@ describe("self-hosted DuckDB-WASM files", () => {
     expect(scripts.predev).toContain("copy-duckdb");
     expect(scripts.prebuild).toContain("copy-duckdb");
     expect(readFileSync(".gitignore", "utf8")).toMatch(/^\/public\/duckdb\/$/m);
+    execFileSync("node", ["scripts/copy-duckdb.mjs"]); // what predev and prebuild run
     for (const file of Object.values(DUCKDB_FILES)) {
       expect(existsSync(`public${file}`), file).toBe(true);
     }

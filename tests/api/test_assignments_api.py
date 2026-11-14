@@ -344,3 +344,14 @@ def test_only_the_owner_can_export(client: TestClient) -> None:
     aid, _ = published(client)
     other = register(client, "nosy@umich.edu")
     assert client.get(f"/assignments/{aid}/canvas.csv", headers=other).status_code == 404
+
+
+def test_a_canvas_export_over_5_mb_is_refused(client: TestClient) -> None:
+    aid, teacher = published(client)
+    big = "x" * (5 * 1024 * 1024 + 1)
+    resp = client.post(
+        f"/assignments/{aid}/canvas.csv",
+        content=big,
+        headers={**teacher, "content-type": "text/csv"},
+    )
+    assert resp.status_code == 413

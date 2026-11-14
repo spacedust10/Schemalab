@@ -16,9 +16,17 @@ COLUMNS = ["Student", "ID", "SIS User ID", "SIS Login ID", "Section"]
 POINTS = 100
 
 
+# Spreadsheets skip these before deciding whether a cell is a formula.
+_SKIPPED = " \t\r\n\u00a0\u200b\u200c\u200d\u2060\ufeff"
+_FORMULA = set("=+-@|%")
+
+
 def defuse(cell: str) -> str:
-    """Spreadsheets run a cell starting with = + - @ as a formula; a leading ' stops that."""
-    return f"'{cell}" if cell[:1] in ("=", "+", "-", "@", "\t", "\r") else cell
+    """A cell a spreadsheet would run as a formula (after leading spaces and invisible
+    characters, = + - @ | %) gets a leading ' so it stays text."""
+    if cell[:1] in ("\t", "\r") or cell.lstrip(_SKIPPED)[:1] in _FORMULA:
+        return f"'{cell}"
+    return cell
 
 
 def _roster(export: str) -> dict[str, list[str]]:

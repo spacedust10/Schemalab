@@ -407,10 +407,19 @@ async def canvas_csv_matched(
     """The same CSV, with Canvas IDs filled in from the teacher's own gradebook export (the
     request body). The export is read here and not kept."""
     a = await run_in_threadpool(_owned, engine, aid, user)
-    body = await request.body()
-    if len(body) > MAX_EXPORT:
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_EXPORT:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "The export is larger than 5 MB.")
-    export = body.decode("utf-8-sig", errors="replace")
+    body = bytearray()
+    async for chunk in request.stream():  # also caps a body sent without a declared length
+        body += chunk
+        if len(body) > MAX_EXPORT:
+            raise HTTPException(
+                status.HTTP_413_CONTENT_TOO_LARGE, "The export is larger than 5 MB."
+            )
     scores = await run_in_threadpool(_best_scores, engine, aid)
-    text, unmatched = canvas.gradebook(a.title, scores, export)
+    # Decoding and parsing a few megabytes is work for a thread, not the event loop.
+    text, unmatched = await run_in_threadpool(
+        canvas.gradebook, a.title, scores, bytes(body).decode("utf-8-sig", errors="replace")
+    )
     return {"csv": text, "unmatched": unmatched}
