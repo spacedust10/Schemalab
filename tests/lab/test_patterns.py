@@ -170,3 +170,14 @@ def test_overwriting_a_customers_state_moves_past_sales(lab: Lab) -> None:
 def test_type_2_rows_keep_each_sale_where_it_happened(lab: Lab) -> None:
     got = lab.pattern("scd2", "type2")
     assert all(c["ok"] for c in got["checks"]), got["checks"]
+
+
+def test_the_normalized_model_joins_six_tables_for_one_question(lab: Lab) -> None:
+    got = lab.pattern("star", "oltp")
+    assert check(got, "Tables joined for the question")["actual"] == 6
+
+
+def test_a_star_schema_answers_the_same_with_four_tables(lab: Lab) -> None:
+    got = lab.pattern("star", "star")
+    assert all(c["ok"] for c in got["checks"]), got["checks"]
+    assert check(got, "Same answer as the source")["actual"] is True

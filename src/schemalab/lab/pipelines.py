@@ -302,10 +302,117 @@ def _move_ada(c: Any, mode: str) -> None:
     )
 
 
+# OLTP to star schema
+
+_OLTP_SETUP = [
+    "CREATE TABLE demo_regions (id int PRIMARY KEY, name text NOT NULL)",
+    "CREATE TABLE demo_categories (id int PRIMARY KEY, name text NOT NULL)",
+    "CREATE TABLE demo_oltp_customers (id int PRIMARY KEY, name text NOT NULL, "
+    "region_id int NOT NULL REFERENCES demo_regions)",
+    "CREATE TABLE demo_products (id int PRIMARY KEY, name text NOT NULL, "
+    "category_id int NOT NULL REFERENCES demo_categories, price numeric NOT NULL)",
+    "CREATE TABLE demo_oltp_orders (id int PRIMARY KEY, customer_id int NOT NULL "
+    "REFERENCES demo_oltp_customers, ordered_at date NOT NULL)",
+    "CREATE TABLE demo_order_lines (order_id int REFERENCES demo_oltp_orders, line int, "
+    "product_id int NOT NULL REFERENCES demo_products, qty int NOT NULL, "
+    "unit_price numeric NOT NULL, PRIMARY KEY (order_id, line))",
+    "INSERT INTO demo_regions VALUES (1, 'Midwest'), (2, 'Northeast'), (3, 'South'), (4, 'West')",
+    "INSERT INTO demo_categories VALUES (1, 'Books'), (2, 'Games'), (3, 'Garden'), "
+    "(4, 'Kitchen'), (5, 'Toys')",
+    "INSERT INTO demo_oltp_customers SELECT i, 'customer ' || i, i % 4 + 1 "
+    "FROM generate_series(1, 200) i",
+    "INSERT INTO demo_products SELECT i, 'product ' || i, i % 5 + 1, (i % 20 + 1) * 5 "
+    "FROM generate_series(1, 50) i",
+    "INSERT INTO demo_oltp_orders SELECT i, i % 200 + 1, DATE '2024-01-01' + i % 366 "
+    "FROM generate_series(1, 3000) i",
+    "INSERT INTO demo_order_lines SELECT o, l, (o * 7 + l) % 50 + 1, l, p.price "
+    "FROM generate_series(1, 3000) o CROSS JOIN generate_series(1, 3) l "
+    "JOIN demo_products p ON p.id = (o * 7 + l) % 50 + 1",
+]
+
+_STAR_LOAD = [
+    "CREATE TABLE demo_dim_date (date_key int PRIMARY KEY, day date NOT NULL, "
+    "month text NOT NULL, year int NOT NULL)",
+    "CREATE TABLE demo_dim_customer_star (customer_key serial PRIMARY KEY, "
+    "customer_id int NOT NULL, name text NOT NULL, region text NOT NULL)",
+    "CREATE TABLE demo_dim_product (product_key serial PRIMARY KEY, product_id int NOT NULL, "
+    "name text NOT NULL, category text NOT NULL)",
+    "CREATE TABLE demo_fact_order_lines (date_key int NOT NULL REFERENCES demo_dim_date, "
+    "customer_key int NOT NULL REFERENCES demo_dim_customer_star, "
+    "product_key int NOT NULL REFERENCES demo_dim_product, quantity int NOT NULL, "
+    "revenue numeric NOT NULL)",
+    "INSERT INTO demo_dim_date SELECT to_char(d, 'YYYYMMDD')::int, d, to_char(d, 'YYYY-MM'), "
+    "extract(year FROM d)::int FROM generate_series(DATE '2024-01-01', DATE '2024-12-31', "
+    "INTERVAL '1 day') AS g(d)",
+    # Region and category are folded into their dimensions: no joins left to make later.
+    "INSERT INTO demo_dim_customer_star (customer_id, name, region) SELECT c.id, c.name, r.name "
+    "FROM demo_oltp_customers c JOIN demo_regions r ON r.id = c.region_id",
+    "INSERT INTO demo_dim_product (product_id, name, category) SELECT p.id, p.name, k.name "
+    "FROM demo_products p JOIN demo_categories k ON k.id = p.category_id",
+    "INSERT INTO demo_fact_order_lines SELECT to_char(o.ordered_at, 'YYYYMMDD')::int, "
+    "dc.customer_key, dp.product_key, l.qty, l.qty * l.unit_price "
+    "FROM demo_order_lines l JOIN demo_oltp_orders o ON o.id = l.order_id "
+    "JOIN demo_dim_customer_star dc ON dc.customer_id = o.customer_id "
+    "JOIN demo_dim_product dp ON dp.product_id = l.product_id",
+]
+
+_OLTP_QUESTION = (
+    "SELECT k.name, r.name, to_char(o.ordered_at, 'YYYY-MM'), sum(l.qty * l.unit_price) "
+    "FROM demo_order_lines l JOIN demo_oltp_orders o ON o.id = l.order_id "
+    "JOIN demo_products p ON p.id = l.product_id JOIN demo_categories k ON k.id = p.category_id "
+    "JOIN demo_oltp_customers c ON c.id = o.customer_id JOIN demo_regions r ON r.id = c.region_id "
+    "GROUP BY 1, 2, 3"
+)
+_STAR_QUESTION = (
+    "SELECT p.category, c.region, d.month, sum(f.revenue) FROM demo_fact_order_lines f "
+    "JOIN demo_dim_product p USING (product_key) "
+    "JOIN demo_dim_customer_star c USING (customer_key) "
+    "JOIN demo_dim_date d USING (date_key) GROUP BY 1, 2, 3"
+)
+
+
+def star(mode: str, connect: Connect) -> Result:
+    """Revenue by category, region and month, from the order-taking schema or from a star
+    schema loaded from it."""
+    with connect() as c:
+        c.execute(
+            "DROP TABLE IF EXISTS demo_fact_order_lines, demo_dim_date, demo_dim_customer_star, "
+            "demo_dim_product, demo_order_lines, demo_oltp_orders, demo_products, "
+            "demo_oltp_customers, demo_categories, demo_regions"
+        )
+        for statement in _OLTP_SETUP:
+            c.execute(statement)
+        source = set(c.execute(_OLTP_QUESTION).fetchall())
+        load_ms = 0.0
+        question = _OLTP_QUESTION
+        if mode == "star":
+            started = time.perf_counter()
+            for statement in _STAR_LOAD:
+                c.execute(statement)
+            load_ms = (time.perf_counter() - started) * 1000
+            question = _STAR_QUESTION
+        c.execute("ANALYZE")
+        row = c.execute(sql.SQL("EXPLAIN (FORMAT JSON) ") + sql.SQL(question)).fetchone()
+        plan = row[0][0]["Plan"] if row else {}
+        tables = {n["Relation Name"] for n in _nodes(plan) if n.get("Relation Name")}
+        started = time.perf_counter()
+        answer = set(c.execute(question).fetchall())
+        query_ms = (time.perf_counter() - started) * 1000
+    return {
+        "checks": [
+            _check("Tables joined for the question", 4, len(tables)),
+            _check("Same answer as the source", True, answer == source),
+        ],
+        "stats": {"groups": len(answer), "load_ms": round(load_ms), "query_ms": round(query_ms)},
+        "ms": round(load_ms + query_ms),
+    }
+
+
 EXPERIMENTS = {
     "cdc": (cdc, ("polling", "change_log")),
     "partitioning": (partitioning, ("one_table", "partitioned")),
     "scd2": (scd2, ("overwrite", "type2")),
+    "star": (star, ("oltp", "star")),
 }
 
 CATALOG: list[dict[str, Any]] = [
@@ -370,6 +477,27 @@ CATALOG: list[dict[str, Any]] = [
                 "The current row is closed with valid_to "
                 "and a new version starts; each sale keeps the key of the version current "
                 "when it was loaded.",
+            ),
+        ],
+    },
+    {
+        "id": "star",
+        "group": "pipelines",
+        "title": "OLTP to star schema",
+        "question": "Revenue by category, region and month, over 3,000 orders. How many "
+        "tables does the question touch, and is the answer the same?",
+        "modes": [
+            _mode(
+                "oltp",
+                "Order-taking schema",
+                "Asks the normalized tables the application "
+                "writes to: order lines, orders, products, categories, customers, regions.",
+            ),
+            _mode(
+                "star",
+                "Star schema",
+                "Loads a fact table of order lines with product, "
+                "customer and date dimensions (category and region folded in), then asks it.",
             ),
         ],
     },
