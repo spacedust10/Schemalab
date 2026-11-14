@@ -1,5 +1,8 @@
 """SQL assignments: build (with checks), share by link, take in tutor or exam mode.
 
+Handlers are plain functions: FastAPI runs them in its thread pool, so database calls and
+grading never block the event loop.
+
 The reference query and hidden tests are shown to the assignment's owner only. Students see
 the prompt, the schema, the sample rows and the names of the tests; in exam mode they get a
 fixed number of attempts and never see hidden rows.
@@ -16,7 +19,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import Engine, func, insert, select
 from sqlalchemy.exc import IntegrityError, OperationalError
-from starlette.concurrency import run_in_threadpool
 
 from schemalab import assignments as asg
 from schemalab.agent.graph import json_value
@@ -115,12 +117,7 @@ def reserve_attempt(engine: Engine, aid: str, user_id: int, limit: int) -> bool:
     count at the same moment try the same slot; the key lets one through and the other counts
     again."""
     for _ in range(limit + 20):
-        with engine.connect() as conn:
-            used = conn.execute(
-                select(func.count()).where(
-                    attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
-                )
-            ).scalar_one()
+        used = _slots_used(engine, aid, user_id)
         if used >= limit:
             return False
         try:
@@ -139,14 +136,20 @@ def reserve_attempt(engine: Engine, aid: str, user_id: int, limit: int) -> bool:
 
 
 def _slots_used(engine: Engine, aid: str, user_id: int) -> int:
+    """Attempts used: claimed slots, or recorded submissions if more (attempts made before
+    slots were claimed still count)."""
     with engine.connect() as conn:
-        return int(
-            conn.execute(
-                select(func.count()).where(
-                    attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
-                )
-            ).scalar_one()
-        )
+        slots = conn.execute(
+            select(func.count()).where(
+                attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
+            )
+        ).scalar_one()
+        made = conn.execute(
+            select(func.count()).where(
+                submissions.c.assignment_id == aid, submissions.c.user_id == user_id
+            )
+        ).scalar_one()
+    return max(int(slots), int(made))
 
 
 @router.get("")
@@ -166,16 +169,16 @@ def overview(user: UserDep, engine: EngineDep) -> list[dict[str, Any]]:
 
 
 @router.post("/check")
-async def check(user: UserDep, body: AssignmentBody, cache: CacheDir) -> dict[str, list[str]]:
-    return await run_in_threadpool(asg.check, body.assignment(), cache)
+def check(user: UserDep, body: AssignmentBody, cache: CacheDir) -> dict[str, list[str]]:
+    return asg.check(body.assignment(), cache)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create(
+def create(
     user: UserDep, body: AssignmentBody, cache: CacheDir, engine: EngineDep
 ) -> dict[str, Any]:
     a = body.assignment()
-    found = await run_in_threadpool(asg.check, a, cache)
+    found = asg.check(a, cache)
     if found["errors"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, found)
     aid = secrets.token_urlsafe(12)
@@ -195,7 +198,7 @@ async def create(
 
 
 @router.get("/{aid}")
-async def view(aid: str, user: UserDep, engine: EngineDep, cache: CacheDir) -> dict[str, Any]:
+def view(aid: str, user: UserDep, engine: EngineDep, cache: CacheDir) -> dict[str, Any]:
     a, mode, limit, owner = _found(engine, aid)
     _, best = _attempts(engine, aid, user["id"])
     used = _slots_used(engine, aid, user["id"])
@@ -204,7 +207,7 @@ async def view(aid: str, user: UserDep, engine: EngineDep, cache: CacheDir) -> d
         "title": a.title,
         "prompt": a.prompt,
         "schema": a.schema,
-        "tables": await run_in_threadpool(_sample_tables, a, cache),
+        "tables": _sample_tables(a, cache),
         "tests": [asg.SAMPLE, *[name for name, _ in a.hidden]],
         "ordered": a.ordered,
         "mode": mode,
@@ -221,13 +224,13 @@ async def view(aid: str, user: UserDep, engine: EngineDep, cache: CacheDir) -> d
 
 
 @router.post("/{aid}/submit")
-async def submit(
+def submit(
     aid: str, body: Submission, user: UserDep, engine: EngineDep, cache: CacheDir
 ) -> dict[str, Any]:
     a, mode, limit, _ = _found(engine, aid)
     if limit is not None and not reserve_attempt(engine, aid, user["id"], limit):
         raise HTTPException(status.HTTP_409_CONFLICT, f"No attempts left (the limit is {limit}).")
-    result = await run_in_threadpool(asg.grade, a, body.sql, mode, cache)  # type: ignore[arg-type]
+    result = asg.grade(a, body.sql, mode, cache)  # type: ignore[arg-type]
     with engine.begin() as conn:
         conn.execute(
             insert(submissions).values(

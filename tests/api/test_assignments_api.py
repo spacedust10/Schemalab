@@ -147,3 +147,28 @@ def test_exam_attempts_cannot_be_raced_past_the_limit(tmp_path: Any) -> None:
     for t in threads:
         t.join(timeout=30)
     assert sorted(wins) == [False] * 4 + [True] * 2
+
+
+def test_attempts_made_before_slots_existed_still_count(tmp_path: Any) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import insert
+
+    from schemalab.api.assignments import reserve_attempt
+    from schemalab.store import create_user, make_engine, submissions
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:
+        uid = create_user(conn, "early@umich.edu", "correct horse battery")
+        for _ in range(2):  # recorded before attempt slots were claimed
+            conn.execute(
+                insert(submissions).values(
+                    assignment_id="exam1",
+                    user_id=uid,
+                    sql="SELECT 1",
+                    score=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+    assert reserve_attempt(engine, "exam1", uid, limit=2) is False
+    assert reserve_attempt(engine, "exam1", uid, limit=3) is True
