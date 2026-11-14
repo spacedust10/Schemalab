@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import Engine, func, insert, select
+from sqlalchemy import Engine, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from schemalab import assignments as asg
@@ -112,27 +112,44 @@ def _table_rows(path: Path) -> dict[str, Any]:
     return out
 
 
-def reserve_attempt(engine: Engine, aid: str, user_id: int, limit: int) -> bool:
-    """Claim the next attempt slot, or False when all `limit` are taken. Two requests that
-    count at the same moment try the same slot; the key lets one through and the other counts
-    again."""
+def reserve_attempt(engine: Engine, aid: str, user_id: int, limit: int) -> int | None:
+    """Claim the next attempt slot and return its number, or None when all `limit` are used.
+    Slots are numbered after the highest existing one; two requests that pick the same number
+    at once collide on the key, and the loser looks again."""
     for _ in range(limit + 20):
-        used = _slots_used(engine, aid, user_id)
-        if used >= limit:
-            return False
+        if _slots_used(engine, aid, user_id) >= limit:
+            return None
+        with engine.connect() as conn:
+            highest = conn.execute(
+                select(func.max(attempt_slots.c.attempt_no)).where(
+                    attempt_slots.c.assignment_id == aid, attempt_slots.c.user_id == user_id
+                )
+            ).scalar_one()
+        number = (highest or 0) + 1
         try:
             with engine.begin() as conn:
                 conn.execute(
                     insert(attempt_slots).values(
-                        assignment_id=aid, user_id=user_id, attempt_no=used + 1
+                        assignment_id=aid, user_id=user_id, attempt_no=number
                     )
                 )
-            return True
+            return number
         except IntegrityError:
-            continue  # another request took that slot first
+            continue  # another request took that number first
         except OperationalError:
-            time.sleep(0.02)  # SQLite busy with another writer
-    return False
+            time.sleep(0.02)  # SQLite busy with another writer; this runs in a worker thread
+    return None
+
+
+def _release(engine: Engine, aid: str, user_id: int, number: int) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            delete(attempt_slots).where(
+                attempt_slots.c.assignment_id == aid,
+                attempt_slots.c.user_id == user_id,
+                attempt_slots.c.attempt_no == number,
+            )
+        )
 
 
 def _slots_used(engine: Engine, aid: str, user_id: int) -> int:
@@ -228,9 +245,15 @@ def submit(
     aid: str, body: Submission, user: UserDep, engine: EngineDep, cache: CacheDir
 ) -> dict[str, Any]:
     a, mode, limit, _ = _found(engine, aid)
-    if limit is not None and not reserve_attempt(engine, aid, user["id"], limit):
+    slot = None if limit is None else reserve_attempt(engine, aid, user["id"], limit)
+    if limit is not None and slot is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"No attempts left (the limit is {limit}).")
-    result = asg.grade(a, body.sql, mode, cache)  # type: ignore[arg-type]
+    try:
+        result = asg.grade(a, body.sql, mode, cache)  # type: ignore[arg-type]
+    except Exception:
+        if slot is not None:  # our failure, not the student's: the attempt is given back
+            _release(engine, aid, user["id"], slot)
+        raise
     with engine.begin() as conn:
         conn.execute(
             insert(submissions).values(

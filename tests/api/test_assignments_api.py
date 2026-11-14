@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import register
@@ -139,7 +140,7 @@ def test_exam_attempts_cannot_be_raced_past_the_limit(tmp_path: Any) -> None:
 
     def go() -> None:
         start.wait()
-        wins.append(reserve_attempt(engine, "exam1", uid, limit=2))
+        wins.append(reserve_attempt(engine, "exam1", uid, limit=2) is not None)
 
     threads = [threading.Thread(target=go) for _ in range(6)]
     for t in threads:
@@ -170,5 +171,49 @@ def test_attempts_made_before_slots_existed_still_count(tmp_path: Any) -> None:
                     created_at=datetime.now(UTC),
                 )
             )
-    assert reserve_attempt(engine, "exam1", uid, limit=2) is False
-    assert reserve_attempt(engine, "exam1", uid, limit=3) is True
+    assert reserve_attempt(engine, "exam1", uid, limit=2) is None
+    assert reserve_attempt(engine, "exam1", uid, limit=3) is not None
+
+
+def test_a_slot_without_a_submission_does_not_lock_the_student_out(tmp_path: Any) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import insert
+
+    from schemalab.api.assignments import reserve_attempt
+    from schemalab.store import attempt_slots, create_user, make_engine, submissions
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'gap.db'}")
+    with engine.begin() as conn:
+        uid = create_user(conn, "gap@umich.edu", "correct horse battery")
+        for _ in range(2):
+            conn.execute(
+                insert(submissions).values(
+                    assignment_id="exam1",
+                    user_id=uid,
+                    sql="SELECT 1",
+                    score=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+        # A slot whose grading never recorded a submission.
+        conn.execute(insert(attempt_slots).values(assignment_id="exam1", user_id=uid, attempt_no=3))
+    assert reserve_attempt(engine, "exam1", uid, limit=5) == 4
+
+
+def test_a_grading_failure_gives_the_attempt_back(client: TestClient, monkeypatch: Any) -> None:
+    from schemalab import assignments as asg
+
+    teacher = register(client, "t2@umich.edu")
+    aid = client.post("/assignments", json={**NEW, "max_attempts": 1}, headers=teacher).json()["id"]
+    student = register(client, "s2@umich.edu")
+
+    def broken(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("grader crashed")
+
+    monkeypatch.setattr(asg, "grade", broken)
+    with pytest.raises(RuntimeError, match="grader crashed"):  # the test client re-raises it
+        client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
+    monkeypatch.undo()
+    retried = client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
+    assert retried.status_code == 200 and retried.json()["score"] == 100
