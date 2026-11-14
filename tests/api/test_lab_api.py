@@ -250,3 +250,44 @@ def test_an_authentication_error_from_the_server_is_not_repeated(
     assert resp.status_code == 409 and "could not finish" in resp.json()["detail"]
     for text in (resp.text, caplog.text):
         assert "10.0.0.5" not in text and "lab_u1" not in text
+
+
+@needs_postgres
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        ("TooManyConnections", "too many connections"),  # 53300, can come at connect time
+        ("QueryCanceled", "30-second"),  # 57014, the statement timeout
+        ("DeadlockDetected", "deadlock"),  # 40P01
+        ("InsufficientPrivilege", "could not finish"),  # 42501, unlisted: fixed default
+    ],
+)
+def test_errors_get_written_messages_never_server_text(
+    lab_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error: str,
+    expected: str,
+) -> None:
+    import psycopg
+
+    from schemalab.lab.session import Lab
+
+    class Diag:
+        message_primary = 'role "lab_u1" at 10.0.0.5: details from the server'
+
+    base = getattr(psycopg.errors, error)
+    failure = type("Failure", (base,), {"diag": property(lambda self: Diag())})
+
+    def broken(self: Lab, name: str, mode: str, slots: Any = None) -> dict[str, Any]:
+        raise failure("x")
+
+    headers = register(lab_client)
+    lab_client.post("/lab/start", headers=headers)
+    monkeypatch.setattr(Lab, "pattern", broken)
+    resp = lab_client.post(
+        "/lab/pattern", json={"id": "transfer", "mode": "atomic"}, headers=headers
+    )
+    assert resp.status_code == 409 and expected in resp.json()["detail"].lower()
+    for text in (resp.text, caplog.text):
+        assert "10.0.0.5" not in text and "lab_u1" not in text

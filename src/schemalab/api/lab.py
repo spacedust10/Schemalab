@@ -31,9 +31,13 @@ Session = Literal["A", "B"]
 _labs: dict[int, Lab] = {}
 # Experiments open several connections each; this many may run at once across all users.
 _pattern_slots = threading.BoundedSemaphore(4)
-# SQLSTATE classes about the statement itself: data, integrity, transaction state,
-# rollback (deadlock, serialization), syntax, resources, operator intervention (timeouts).
-_STATEMENT_CLASSES = {"22", "23", "25", "40", "42", "53", "57"}
+# What an experiment's failure means, written here rather than taken from the server.
+_EXPLAINED = {
+    "40P01": "a deadlock was detected and retrying did not get past it.",
+    "40001": "a serialization failure was not resolved by retrying.",
+    "57014": "a statement ran past the lab's 30-second limit.",
+    "53300": "your lab has too many connections open; close a session and try again.",
+}
 logger = logging.getLogger(__name__)
 _labs_lock = threading.Lock()
 
@@ -169,15 +173,13 @@ def pattern(user: UserDep, body: PatternRequest) -> dict[str, Any]:
     except RuntimeError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None  # our own messages
     except psycopg.Error as e:
-        # The log gets the error's type and SQLSTATE only. The reply repeats PostgreSQL's
-        # message only for statement-level errors; connection and authentication errors
-        # (classes 08 and 28, or none for a client-side failure) can name hosts and users.
+        # Experiments run fixed SQL, so PostgreSQL's own text adds nothing a user needs, and
+        # some errors (connection, authentication) can name hosts and users. The reply is a
+        # message written here for the error's SQLSTATE; the log gets the type and SQLSTATE.
         logger.warning(
             "pattern %s/%s stopped: %s (%s)", body.id, body.mode, type(e).__name__, e.sqlstate
         )
-        statement_level = (e.sqlstate or "")[:2] in _STATEMENT_CLASSES
-        primary = getattr(e.diag, "message_primary", None) if statement_level else None
-        detail = primary or "The experiment could not finish."
+        detail = _EXPLAINED.get(e.sqlstate or "", "The experiment could not finish.")
         raise HTTPException(status.HTTP_409_CONFLICT, f"The experiment stopped: {detail}") from None
 
 
