@@ -201,19 +201,29 @@ def test_a_slot_without_a_submission_does_not_lock_the_student_out(tmp_path: Any
     assert reserve_attempt(engine, "exam1", uid, limit=5) == 4
 
 
-def test_a_grading_failure_gives_the_attempt_back(client: TestClient, monkeypatch: Any) -> None:
+def test_only_a_failure_on_our_side_gives_the_attempt_back(
+    client: TestClient, monkeypatch: Any
+) -> None:
     from schemalab import assignments as asg
 
     teacher = register(client, "t2@umich.edu")
     aid = client.post("/assignments", json={**NEW, "max_attempts": 1}, headers=teacher).json()["id"]
     student = register(client, "s2@umich.edu")
 
-    def broken(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError("grader crashed")
+    def unavailable(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise asg.GraderUnavailable("the test databases could not be built")
 
-    monkeypatch.setattr(asg, "grade", broken)
-    with pytest.raises(RuntimeError, match="grader crashed"):  # the test client re-raises it
+    monkeypatch.setattr(asg, "grade", unavailable)
+    with pytest.raises(asg.GraderUnavailable):  # the test client re-raises it
+        client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
+
+    def crashed(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("something the submission set off")
+
+    monkeypatch.setattr(asg, "grade", crashed)
+    with pytest.raises(RuntimeError):
         client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
     monkeypatch.undo()
-    retried = client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
-    assert retried.status_code == 200 and retried.json()["score"] == 100
+    # The first failure gave the attempt back; the second did not, so none is left.
+    resp = client.post(f"/assignments/{aid}/submit", json={"sql": RIGHT}, headers=student)
+    assert resp.status_code == 409

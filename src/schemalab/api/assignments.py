@@ -258,8 +258,11 @@ def submit(
         raise HTTPException(status.HTTP_409_CONFLICT, f"No attempts left (the limit is {limit}).")
     try:
         result = asg.grade(a, body.sql, mode, cache)  # type: ignore[arg-type]
-    except Exception:
-        if slot is not None:  # our failure, not the student's: the attempt is given back
+    except asg.GraderUnavailable:
+        # Our failure (building the databases, running the reference), never the student's:
+        # the attempt is given back. Anything else keeps it, so a submission crafted to break
+        # the grader cannot buy more attempts.
+        if slot is not None:
             _release(engine, aid, user["id"], slot)
         raise
     with engine.begin() as conn:

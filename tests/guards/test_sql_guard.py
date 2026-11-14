@@ -213,3 +213,9 @@ def test_unicode_format_characters_never_reach_the_message_and_it_stays_short() 
     assert "SELECT" in message  # the message does quote the SQL
     assert not any(c in message for c in hidden)
     assert len(message) <= 600
+
+
+def test_sql_nested_too_deeply_to_parse_is_refused_not_raised() -> None:
+    deep = "SELECT " + "(" * 3000 + "1" + ")" * 3000
+    with pytest.raises(UnsafeSQLError, match="nested too deeply"):
+        check_sql(deep, {"orders"})

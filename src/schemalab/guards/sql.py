@@ -45,6 +45,8 @@ def check_sql(sql: str, allowed_tables: Collection[str]) -> str:
     """Return the normalized SQL to run, or raise UnsafeSQLError saying why not."""
     try:
         parsed = sqlglot.parse(sql, read="duckdb")
+    except RecursionError:
+        raise UnsafeSQLError("could not parse SQL: the query is nested too deeply") from None
     except sqlglot.errors.SqlglotError as e:  # ParseError, and TokenError for an unclosed quote
         # sqlglot underlines the bad token with terminal escape codes, and the message quotes
         # the model's SQL: drop escape sequences, then every other control character.

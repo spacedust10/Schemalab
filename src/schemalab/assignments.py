@@ -95,14 +95,25 @@ def _plain(row: tuple[Any, ...]) -> list[Any]:
     return [v if isinstance(v, int | float | str | bool) or v is None else str(v) for v in row]
 
 
-_FAILURES = (UnsafeSQLError, QueryTimeoutError, duckdb.Error)
+# Anything the student's query can cause: refused by the guard, too slow, or an error in
+# DuckDB (the guard turns a query too deep to parse into a refusal too).
+_FAILURES = (UnsafeSQLError, QueryTimeoutError, duckdb.Error, RecursionError)
+
+
+class GraderUnavailable(RuntimeError):
+    """The grader could not build the assignment's databases or run its reference query: a
+    failure on our side, never the submission's, so it should not cost an attempt."""
 
 
 def grade(a: Assignment, sql: str, mode: Mode, cache: Path) -> dict[str, Any]:
     if mode not in ("tutor", "exam"):
         raise ValueError(f"Unknown grading mode {mode!r}.")
     tests = [(SAMPLE, a.data), *a.hidden]
-    paths = [(name, database(cache, a.schema, data)) for name, data in tests]
+    try:
+        paths = [(name, database(cache, a.schema, data)) for name, data in tests]
+        answers = {name: run_query(path, a.reference) for name, path in paths}
+    except Exception as e:
+        raise GraderUnavailable("The assignment's databases or reference query failed.") from e
     sample = paths[0][1]
     try:
         first = run_query(sample, sql)
@@ -113,7 +124,7 @@ def grade(a: Assignment, sql: str, mode: Mode, cache: Path) -> dict[str, Any]:
             "error": explain(sql, str(e), schema_of(sample)),
             "tests": [{"name": name, "passed": False} for name, _ in tests],
         }
-    expected = run_query(sample, a.reference)
+    expected = answers[SAMPLE]
     if [c.lower() for c in first.columns] == [c.lower() for c in expected.columns]:
         columns = 20
     elif len(first.columns) == len(expected.columns):
@@ -123,7 +134,7 @@ def grade(a: Assignment, sql: str, mode: Mode, cache: Path) -> dict[str, Any]:
 
     results = []
     for name, path in paths:
-        want = run_query(path, a.reference)
+        want = answers[name]
         try:
             got = first if path == sample else run_query(path, sql)
         except _FAILURES as e:

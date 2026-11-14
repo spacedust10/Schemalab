@@ -196,3 +196,9 @@ def test_an_unknown_mode_is_refused_rather_than_shown_hidden_rows(
 ) -> None:
     with pytest.raises(ValueError, match="mode"):
         grade(COURSES, INNER_JOIN, mode, tmp_path)  # type: ignore[arg-type]
+
+
+def test_sql_that_crashes_the_parser_scores_zero_instead_of_escaping(tmp_path: Path) -> None:
+    deep = "SELECT " + "(" * 3000 + "1" + ")" * 3000
+    got = grade(COURSES, deep, "exam", tmp_path)
+    assert got["score"] == 0 and got["error"]["title"]
