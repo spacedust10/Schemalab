@@ -101,4 +101,11 @@ describe("snapshot lines", () => {
     expect(changeLine({ something_new: ["x"] })).toBe("something new");
     expect(changeLine({})).toBe("no change");
   });
+
+  it("keep the loader's own bookkeeping out of the way", () => {
+    expect(changeLine({ schemas_created: ["main"] })).toBe("made the lake");
+    expect(changeLine({ schemas_created: ["bronze_staging"] })).toBe("loader bookkeeping");
+    expect(changeLine({ tables_created: ["bronze._dlt_version", "bronze.quakes", "bronze._dlt_loads"], inlined_insert: ["7"] })).toBe("created bronze.quakes; added rows");
+    expect(changeLine({ tables_created: ["bronze_staging._dlt_version", "bronze_staging.quakes"], inlined_insert: ["4"] })).toBe("loader bookkeeping; added rows");
+  });
 });

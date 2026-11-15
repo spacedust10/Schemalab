@@ -56,12 +56,25 @@ export function runLine(run: Run): string {
 
 export const busy = (runs: Run[]) => runs.some((r) => r.status === "running");
 
+/** A user's own table: in a layer, and not one of dlt's _dlt_* tables. */
+const own = (name: string) => {
+  const [schema, table = ""] = name.split(".");
+  return (LAYERS as readonly string[]).includes(schema) && !table.startsWith("_dlt");
+};
+
 /** DuckLake's snapshot change keys in plain words. Inserts name internal ids, so no names. */
 export function changeLine(changes: Record<string, string[]>): string {
   const parts = Object.entries(changes).map(([key, values]) => {
-    if (key === "tables_created") return `created ${values.join(", ")}`;
-    if (key === "tables_dropped") return `dropped ${values.join(", ")}`;
-    if (key === "schemas_created") return `created layer ${values.join(", ")}`;
+    if (key === "schemas_created") {
+      if (values.includes("main")) return "made the lake";
+      const layers = values.filter((v) => (LAYERS as readonly string[]).includes(v));
+      return layers.length ? `created layer ${layers.join(", ")}` : "loader bookkeeping";
+    }
+    if (key === "tables_created" || key === "tables_dropped") {
+      const mine = values.filter(own);
+      if (!mine.length) return "loader bookkeeping";
+      return `${key === "tables_created" ? "created" : "dropped"} ${mine.join(", ")}`;
+    }
     if (key.includes("insert")) return "added rows";
     if (key.includes("delete")) return "removed rows";
     return key.replaceAll("_", " ");
