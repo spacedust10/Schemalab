@@ -9,6 +9,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -28,6 +30,12 @@ LAYERS = ("bronze", "silver", "gold")
 PREVIEW_ROWS = 50
 # Scalar functions that read the host: the environment holds the catalog password and S3 key.
 _FORBIDDEN = frozenset({"getenv", "current_setting", "read_text", "read_blob"})
+
+
+# Attaching a new lake creates its catalog schema; two requests doing that at once collide in
+# Postgres. ponytail: per-process locks, enough for one ingest container; use a Postgres
+# advisory lock if ingest ever runs as several replicas.
+_ATTACH: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
 class LakeError(ValueError):
@@ -60,12 +68,13 @@ def connect(s: Settings, name: str) -> Iterator[duckdb.DuckDBPyConnection]:
                 f"REGION {_quote(s.s3.region)}, URL_STYLE 'path', USE_SSL false, "
                 f"SCOPE {_quote(s.data_root)})"
             )
-        con.execute(
-            f"ATTACH {_quote('ducklake:postgres:' + s.catalog)} AS lake "
-            f"(DATA_PATH {_quote(_data_path(s, name))}, METADATA_SCHEMA {_quote(name)})"
-        )
-        for layer in LAYERS:
-            con.execute(f"CREATE SCHEMA IF NOT EXISTS lake.{layer}")
+        with _ATTACH[name]:
+            con.execute(
+                f"ATTACH {_quote('ducklake:postgres:' + s.catalog)} AS lake "
+                f"(DATA_PATH {_quote(_data_path(s, name))}, METADATA_SCHEMA {_quote(name)})"
+            )
+            for layer in LAYERS:
+                con.execute(f"CREATE SCHEMA IF NOT EXISTS lake.{layer}")
         yield con
     finally:
         con.close()

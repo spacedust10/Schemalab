@@ -171,3 +171,12 @@ def test_only_lake_names_the_api_makes_are_accepted(s: Settings) -> None:
         with pytest.raises(lk.LakeError):
             lk.tables(s, bad)
     assert re.fullmatch(lk.NAME.pattern, "u12")
+
+
+def test_a_new_lake_can_be_opened_by_several_requests_at_once(s: Settings, name: str) -> None:
+    # The page asks for the overview while the first load is creating the lake.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(lambda _: lk.tables(s, name), range(4)))
+    assert results == [[]] * 4
