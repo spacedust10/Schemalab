@@ -355,3 +355,15 @@ def test_a_canvas_export_over_5_mb_is_refused(client: TestClient) -> None:
         headers={**teacher, "content-type": "text/csv"},
     )
     assert resp.status_code == 413
+
+
+def test_a_large_sample_says_how_many_rows_it_really_has(client: TestClient) -> None:
+    rows = ", ".join(f"({i}, 'c{i}', NULL)" for i in range(1, 61))
+    teacher = register(client, "big@umich.edu")
+    aid = client.post(
+        "/assignments",
+        json={**NEW, "data": f"INSERT INTO customers VALUES {rows};"},
+        headers=teacher,
+    ).json()["id"]
+    table = client.get(f"/assignments/{aid}", headers=teacher).json()["tables"]["customers"]
+    assert len(table["rows"]) == 50 and table["total"] == 60

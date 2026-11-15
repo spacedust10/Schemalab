@@ -110,7 +110,12 @@ def _table_rows(path: Path) -> dict[str, Any]:
             # Names come from the catalog; quoted and escaped all the same.
             quoted = '"' + table.replace('"', '""') + '"'
             rows = con.execute(f"SELECT * FROM {quoted} LIMIT {SAMPLE_ROWS}").fetchall()  # noqa: S608
-            out[table] = {"columns": columns, "rows": [[json_value(v) for v in r] for r in rows]}
+            (total,) = con.execute(f"SELECT count(*) FROM {quoted}").fetchone() or (0,)  # noqa: S608
+            out[table] = {
+                "columns": columns,
+                "rows": [[json_value(v) for v in r] for r in rows],
+                "total": total,  # the grader uses every row; the page shows at most SAMPLE_ROWS
+            }
     return out
 
 
