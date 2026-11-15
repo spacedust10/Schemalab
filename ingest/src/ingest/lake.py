@@ -207,6 +207,15 @@ def load_file(s: Settings, name: str, path: Path, table: str) -> dict[str, int]:
     return _run(s, name, table, dlt.resource(data, name=table, write_disposition="replace"))
 
 
+def load_sheet(s: Settings, name: str, csv: bytes, table: str) -> dict[str, int]:
+    """A Google Sheet's CSV export, already downloaded by the caller."""
+    s.work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=s.work_dir, suffix=".csv") as f:
+        f.write(csv)
+        f.flush()
+        return load_file(s, name, Path(f.name), table)
+
+
 def load_quakes(s: Settings, name: str, fetch: Callable[[str], dict[str, Any]]) -> dict[str, int]:
     """USGS earthquakes, merged by id; each run asks only for events after the newest one."""
 

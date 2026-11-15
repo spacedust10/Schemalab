@@ -19,6 +19,7 @@ class Settings:
     data_root: str  # s3://bucket, or a local directory in tests
     publish_dir: Path  # where silver and gold are copied for Ask
     work_dir: Path  # dlt's pipeline state
+    inbox_dir: Path = Path("/data/inbox")  # files the API hands over, deleted once loaded
     s3: S3 | None = None
 
     @classmethod
@@ -32,5 +33,6 @@ class Settings:
             data_root=env["INGEST_DATA_ROOT"],
             publish_dir=Path(env["INGEST_PUBLISH_DIR"]),
             work_dir=Path(env.get("INGEST_WORK_DIR", "/tmp/ingest")),  # noqa: S108
+            inbox_dir=Path(env["INGEST_INBOX_DIR"]),
             s3=s3,
         )

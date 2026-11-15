@@ -45,3 +45,5 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"
+# Any new warning fails the suite, as in the API. Starlette's TestClient asks for httpx2.
+filterwarnings = ["error", "ignore:Using `httpx` with `starlette.testclient` is deprecated"]
