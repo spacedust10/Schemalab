@@ -11,7 +11,7 @@ export type Grade = {
   best: number | null;
 };
 export type Summary = { id: string; title: string; mode: "tutor" | "exam"; mine: boolean };
-export type SampleTable = { columns: string[]; rows: unknown[][] };
+export type SampleTable = { columns: string[]; rows: unknown[][]; total: number };
 export type AssignmentView = {
   id: string;
   title: string;

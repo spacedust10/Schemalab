@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SampleTable } from "@/lib/assignments";
 import type { Scratchpad as Engine } from "@/lib/duckdb-browser";
+import { DUCKDB_CORE } from "@/lib/duckdb-files";
 import { fmt } from "@/lib/format";
 
 /** Run queries on the sample rows in the browser: not graded, no attempts used. */
@@ -12,6 +13,9 @@ export function ScratchPad({ tables, starter }: { tables: Record<string, SampleT
   const [state, setState] = useState<"off" | "loading" | "ready">("off");
   const [result, setResult] = useState<{ columns: string[]; rows: unknown[][] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cut = Object.entries(tables)
+    .filter(([, t]) => t.total > t.rows.length)
+    .map(([name, t]) => ({ name, shown: t.rows.length, total: t.total }));
 
   useEffect(() => () => void engine.current?.close(), []);
 
@@ -44,8 +48,14 @@ export function ScratchPad({ tables, starter }: { tables: Record<string, SampleT
       <h2 id="scratch">Scratchpad</h2>
       <p className="hint">
         Try queries on the sample rows, right in your browser. Nothing here is graded or counts as an attempt.
-        It runs DuckDB 1.4.3; the grader runs a newer DuckDB, so a rare query may behave differently there.
+        It runs DuckDB {DUCKDB_CORE}; the grader runs a newer DuckDB, so a rare query may behave differently there.
       </p>
+      {cut.length > 0 && (
+        <p className="hint">
+          Only the first rows of {cut.map((t) => `${t.name} (${t.shown} of ${t.total})`).join(", ")} are here; the
+          grader uses every row, so counts and totals will differ.
+        </p>
+      )}
       {state === "off" && (
         <button type="button" className="button quiet" onClick={() => void start()}>
           Open the scratchpad (about an 8 MB download, once)

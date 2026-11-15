@@ -2,6 +2,7 @@
 import path from "node:path";
 import { createRequire } from "node:module";
 import { beforeAll, describe, expect, it } from "vitest";
+import { DUCKDB_CORE } from "./duckdb-files";
 import { type ArrowResult, LOCKDOWN, plainResult, tableStatements } from "./sandbox";
 
 // The real DuckDB-WASM, through its Node build: the same engine and settings the page uses.
@@ -62,5 +63,11 @@ describe("showing results", () => {
     );
     expect(got.columns).toEqual(["big", "n", "d", "day", "s"]);
     expect(got.rows).toEqual([["9007199254740993", 42, 1.5, "2024-01-02", "x"]]);
+  });
+});
+
+describe("the engine's version", () => {
+  it("is the DuckDB core the page tells students about", () => {
+    expect(rows("SELECT version() AS v")).toEqual([{ v: `v${DUCKDB_CORE}` }]);
   });
 });
