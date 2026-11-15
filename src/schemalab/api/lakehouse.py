@@ -183,7 +183,9 @@ async def load_file(
     handed: list[tuple[str, str]] = []  # (inbox file, table)
     try:
         inbox.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory() as work:
+        # On the inbox's own volume, so the hand-over below is a rename, not a copy across
+        # filesystems (which os.replace cannot do). Ingest never accepts a dot-name.
+        with tempfile.TemporaryDirectory(dir=inbox, prefix=".work-") as work:
             body = Path(work) / "body"
             size = 0
             with body.open("wb") as f:
