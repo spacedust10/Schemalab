@@ -1,5 +1,6 @@
 """The ingest service's HTTP API. Only the Schemalab API can reach it (internal network)."""
 
+import hmac
 import json
 import re
 import threading
@@ -7,7 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -55,8 +56,18 @@ class Transform(BaseModel):
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    app = FastAPI(title="Schemalab ingest")
     s = settings or Settings.from_env()
+    if len(s.token) < 32:
+        raise ValueError("Set INGEST_TOKEN to a random value of at least 32 characters.")
+    expected = f"Bearer {s.token}".encode()
+
+    def caller(authorization: Annotated[str, Header()] = "") -> None:
+        """Network placement is not enough: every call must carry the API's token."""
+        if not hmac.compare_digest(authorization.encode(), expected):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not the API.")
+
+    app = FastAPI(title="Schemalab ingest")
+    lakes = APIRouter(prefix="/lakes/{name}", dependencies=[Depends(caller)])
 
     def lake_name(name: str) -> str:
         if not lk.NAME.fullmatch(name):
@@ -74,7 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/lakes/{name}/load/file")
+    @lakes.post("/load/file")
     def load_file(name: Lake, body: FileLoad) -> dict[str, Any]:
         if not _FILE.fullmatch(body.file):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such file.")
@@ -85,14 +96,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             path.unlink(missing_ok=True)
 
-    @app.post("/lakes/{name}/load/sheet")
+    @lakes.post("/load/sheet")
     def load_sheet(name: Lake, body: SheetLoad) -> dict[str, Any]:
         url = sources.sheet_export_url(body.url)
         with busy(name):
             csv = sources.download(url, sources.sheet_host)
             return {"tables": lk.load_sheet(s, name, csv, body.table)}
 
-    @app.post("/lakes/{name}/load/quakes")
+    @lakes.post("/load/quakes")
     def load_quakes(name: Lake) -> dict[str, Any]:
         def fetch(url: str) -> dict[str, Any]:
             feed: dict[str, Any] = json.loads(sources.download(url, sources.usgs_host))
@@ -101,21 +112,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with busy(name):
             return {"tables": lk.load_quakes(s, name, fetch)}
 
-    @app.post("/lakes/{name}/transform")
+    @lakes.post("/transform")
     def transform(name: Lake, body: Transform) -> dict[str, Any]:
         with busy(name):
             return {"tables": lk.transform(s, name, [m.model_dump() for m in body.models])}
 
-    @app.get("/lakes/{name}/tables")
+    @lakes.get("/tables")
     def tables(name: Lake) -> list[dict[str, Any]]:
         return lk.tables(s, name)
 
-    @app.get("/lakes/{name}/tables/{layer}/{table}")
+    @lakes.get("/tables/{layer}/{table}")
     def preview(name: Lake, layer: str, table: str, version: int | None = None) -> dict[str, Any]:
         return lk.preview(s, name, layer, table, version)
 
-    @app.get("/lakes/{name}/snapshots")
+    @lakes.get("/snapshots")
     def snapshots(name: Lake) -> list[dict[str, Any]]:
         return lk.snapshots(s, name)
 
+    app.include_router(lakes)
     return app

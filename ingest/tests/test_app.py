@@ -25,12 +25,32 @@ def s(tmp_path: Path) -> Settings:
         publish_dir=tmp_path / "publish",
         work_dir=tmp_path / "work",
         inbox_dir=inbox,
+        token=TOKEN,
     )
+
+
+TOKEN = "t" * 43
 
 
 @pytest.fixture
 def client(s: Settings) -> TestClient:
-    return TestClient(create_app(s))
+    return TestClient(create_app(s), headers={"Authorization": f"Bearer {TOKEN}"})
+
+
+@pytest.mark.parametrize("auth", [None, "Bearer wrong", f"Basic {TOKEN}", f"Bearer {TOKEN}x"])
+def test_only_the_api_token_gets_in(s: Settings, auth: str | None) -> None:
+    anon = TestClient(create_app(s))
+    headers = {"Authorization": auth} if auth else {}
+    assert anon.get("/lakes/u1/tables", headers=headers).status_code == 401
+    assert anon.post("/lakes/u1/load/quakes", headers=headers).status_code == 401
+    assert anon.get("/health").status_code == 200  # for the Compose health check
+
+
+def test_an_empty_token_is_refused_at_start(s: Settings) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(ValueError, match="INGEST_TOKEN"):
+        create_app(replace(s, token=""))
 
 
 @pytest.fixture

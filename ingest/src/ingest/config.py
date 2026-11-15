@@ -20,6 +20,7 @@ class Settings:
     publish_dir: Path  # where silver and gold are copied for Ask
     work_dir: Path  # dlt's pipeline state
     inbox_dir: Path = Path("/data/inbox")  # files the API hands over, deleted once loaded
+    token: str = ""  # the API sends it on every call; only the API holds it
     s3: S3 | None = None
 
     @classmethod
@@ -34,5 +35,6 @@ class Settings:
             publish_dir=Path(env["INGEST_PUBLISH_DIR"]),
             work_dir=Path(env.get("INGEST_WORK_DIR", "/tmp/ingest")),  # noqa: S108
             inbox_dir=Path(env["INGEST_INBOX_DIR"]),
+            token=env.get("INGEST_TOKEN", ""),
             s3=s3,
         )
