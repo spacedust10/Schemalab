@@ -22,7 +22,7 @@ const EXAMPLES = [
   "How did the share of uninsured Michigan residents change by year?",
 ];
 
-type Source = "sample" | "mine";
+type Source = "sample" | "mine" | "lake";
 
 const RECOVERY: Record<string, string> = {
   model: "Check that Ollama is running (ollama serve) and the model is pulled.",
@@ -149,6 +149,15 @@ export function AskView() {
                 Upload a file
               </Link>
             )}
+            <label>
+              <input
+                type="radio"
+                name="source"
+                checked={source === "lake"}
+                onChange={() => setSource("lake")}
+              />
+              Your lakehouse (silver and gold)
+            </label>
             {source === "mine" && (
               <label className="share">
                 <input

@@ -93,3 +93,21 @@ def test_pin_limit(client: TestClient) -> None:
 def test_pins_need_sign_in(client: TestClient) -> None:
     assert client.get("/pins").status_code == 401
     assert client.post("/pins", json=PIN).status_code == 401
+
+
+def test_pins_on_the_lakehouse_read_its_published_tables(
+    app: Any, client: TestClient, tmp_path: Any
+) -> None:
+    import duckdb
+
+    from schemalab.api.lakehouse import get_lake_dir
+
+    app.dependency_overrides[get_lake_dir] = lambda: tmp_path / "lake"
+    headers = register(client)
+    (tmp_path / "lake" / "publish").mkdir(parents=True)
+    with duckdb.connect(str(tmp_path / "lake" / "publish" / "u1.duckdb")) as con:
+        con.execute("CREATE TABLE gold_revenue AS SELECT 14.5 AS total")
+    pin = {"question": "Revenue?", "sql": "SELECT total FROM gold_revenue", "dataset": "lake"}
+    assert client.post("/pins", json=pin, headers=headers).status_code == 201
+    [card] = client.get("/pins", headers=headers).json()
+    assert card["rows"] == [[14.5]]

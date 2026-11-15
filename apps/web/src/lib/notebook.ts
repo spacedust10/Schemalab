@@ -9,17 +9,18 @@ export type Export = {
   headline: string;
   confidence: string;
   sql: string;
-  dataset: "sample" | "mine";
+  dataset: "sample" | "mine" | "lake";
 };
 
 const SAMPLE_DB = "data/samples/schemalab.duckdb";
 const py = (text: string) => JSON.stringify(text);
 
 function intro(e: Export): string {
-  const where =
-    e.dataset === "sample"
-      ? `Run this from the Schemalab folder; it reads \`${SAMPLE_DB}\`.`
-      : "This answer used your own tables, which live in your Schemalab account. Point `DB` at a DuckDB or database file with the same tables.";
+  const where = {
+    sample: `Run this from the Schemalab folder; it reads \`${SAMPLE_DB}\`.`,
+    mine: "This answer used your own tables, which live in your Schemalab account. Point `DB` at a DuckDB or database file with the same tables.",
+    lake: "This answer used your lakehouse's silver and gold tables, which live in your Schemalab account. Point `DB` at a DuckDB file with the same tables.",
+  }[e.dataset];
   return [
     `# ${e.question}`,
     "",

@@ -13,6 +13,7 @@ from schemalab import store
 from schemalab.agent.graph import json_value
 from schemalab.api.auth import EngineDep, UserDep
 from schemalab.api.datasets import SampleDb, UploadsDir, user_db
+from schemalab.api.lakehouse import LakeDir, published
 from schemalab.guards.run import QueryTimeoutError, run_query
 from schemalab.guards.sql import UnsafeSQLError
 
@@ -27,14 +28,20 @@ class PinRequest(BaseModel):
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
     ]
     sql: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000)]
-    dataset: Literal["sample", "mine"] = "sample"
+    dataset: Literal["sample", "mine", "lake"] = "sample"
+
+
+def _db(dataset: str, user: dict[str, Any], sample: Path, uploads: Path, lake: Path) -> Path:
+    if dataset == "sample":
+        return sample
+    return published(lake, user) if dataset == "lake" else user_db(uploads, user)
 
 
 def _run(sql: str, db: Path) -> dict[str, Any]:
     """The query's result, or the reason it cannot run. Never raises for a bad query."""
     failed = {"columns": None, "rows": None, "truncated": False}
     if not db.exists():
-        return {**failed, "error": "No tables uploaded."}
+        return {**failed, "error": "No tables yet."}
     try:
         result = run_query(db, sql, max_rows=MAX_ROWS)
     except (UnsafeSQLError, QueryTimeoutError, duckdb.Error) as e:
@@ -45,10 +52,14 @@ def _run(sql: str, db: Path) -> dict[str, Any]:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def add(
-    user: UserDep, body: PinRequest, engine: EngineDep, sample: SampleDb, uploads: UploadsDir
+    user: UserDep,
+    body: PinRequest,
+    engine: EngineDep,
+    sample: SampleDb,
+    uploads: UploadsDir,
+    lake: LakeDir,
 ) -> dict[str, Any]:
-    db = sample if body.dataset == "sample" else user_db(uploads, user)
-    outcome = _run(body.sql, db)
+    outcome = _run(body.sql, _db(body.dataset, user, sample, uploads, lake))
     if outcome["error"]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"This query cannot be pinned: {outcome['error']}"
@@ -64,12 +75,11 @@ def add(
 
 @router.get("")
 def list_all(
-    user: UserDep, engine: EngineDep, sample: SampleDb, uploads: UploadsDir
+    user: UserDep, engine: EngineDep, sample: SampleDb, uploads: UploadsDir, lake: LakeDir
 ) -> list[dict[str, Any]]:
     with engine.connect() as conn:
         pins = store.list_pins(conn, user["id"])
-    mine = user_db(uploads, user)
-    return [{**p, **_run(p["sql"], sample if p["dataset"] == "sample" else mine)} for p in pins]
+    return [{**p, **_run(p["sql"], _db(p["dataset"], user, sample, uploads, lake))} for p in pins]
 
 
 @router.delete("/{pin_id}", status_code=status.HTTP_204_NO_CONTENT)

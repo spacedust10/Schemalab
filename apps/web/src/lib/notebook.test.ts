@@ -43,6 +43,11 @@ describe("toIpynb", () => {
     const md = JSON.parse(toIpynb({ ...base, dataset: "mine" })).cells[0].source.join("");
     expect(md).toContain("your own tables");
   });
+
+  it("says the lakehouse answer read its silver and gold tables", () => {
+    const md = JSON.parse(toIpynb({ ...base, dataset: "lake" })).cells[0].source.join("");
+    expect(md).toContain("silver and gold tables");
+  });
 });
 
 describe("toMarimo", () => {
