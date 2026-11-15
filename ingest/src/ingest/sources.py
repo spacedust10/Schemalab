@@ -5,13 +5,20 @@ down to its id and rebuilt, so a user cannot point this service at anything else
 """
 
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urljoin, urlsplit
+
+import requests
 
 USGS = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 USGS_PAGE = 2000  # events per run; the next run carries on from the newest one loaded
 USGS_START = timedelta(days=7)  # how far back the first run looks
+
+MAX_BYTES = 50 * 1024 * 1024  # the same cap as uploads
+TIMEOUT = 30  # seconds per request
+REDIRECTS = 5
 
 _SHEET_PATH = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]{20,})(/.*)?")
 _GID = re.compile(r"gid=(\d+)")
@@ -63,3 +70,44 @@ def quake_rows(feed: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def sheet_host(url: str) -> bool:
+    """Google's sheet host, and the content host it redirects exports to."""
+    parts = urlsplit(url)
+    host = parts.netloc  # a port or user@ in it fails both checks
+    google = host == "docs.google.com" or bool(
+        re.fullmatch(r"[a-z0-9-]+\.googleusercontent\.com", host)
+    )
+    return parts.scheme == "https" and google
+
+
+def usgs_host(url: str) -> bool:
+    return url.startswith(USGS + "?")
+
+
+def download(
+    url: str, allowed: Callable[[str], bool], get: Callable[..., Any] = requests.get
+) -> bytes:
+    """GETs url, following a redirect only to where `allowed` says, up to MAX_BYTES."""
+    for _ in range(REDIRECTS):
+        if not allowed(url):
+            if urlsplit(url).netloc == "accounts.google.com":
+                raise SourceError("That sheet is private: share it as 'Anyone with the link'.")
+            raise SourceError("The source sent us somewhere it may not.")
+        reply = get(url, allow_redirects=False, timeout=TIMEOUT, stream=True)
+        try:
+            if reply.is_redirect:
+                url = urljoin(url, reply.headers["location"])
+                continue
+            if reply.status_code != 200:
+                raise SourceError(f"The source answered {reply.status_code}.")
+            body = bytearray()
+            for chunk in reply.iter_content(64 * 1024):
+                body += chunk
+                if len(body) > MAX_BYTES:
+                    raise SourceError(f"The source is larger than {MAX_BYTES // 2**20} MB.")
+            return bytes(body)
+        finally:
+            reply.close()
+    raise SourceError("The source kept redirecting.")
