@@ -83,7 +83,7 @@ def import_file(db: Path, src: Path, filename: str) -> Imported:
                     if suffix == ".csv":
                         sources = [(filename, _as_utf8(src, Path(work)), False)]
                     else:
-                        sources = _excel_to_csv(src, filename, Path(work))
+                        sources = excel_to_csv(src, filename, Path(work))
                     _check_room(taken, len(sources))
                     created = [
                         _load(con, table_name(n, taken), path, header, taken)
@@ -245,7 +245,7 @@ def _tidy_columns(con: duckdb.DuckDBPyConnection, table: str) -> None:
             con.execute(f'ALTER TABLE "{table}" RENAME COLUMN "{quoted}" TO "{new}"')
 
 
-def _excel_to_csv(src: Path, filename: str, work: Path) -> list[tuple[str, Path, bool]]:
+def excel_to_csv(src: Path, filename: str, work: Path) -> list[tuple[str, Path, bool]]:
     """Write each non-empty sheet to a CSV file. openpyxl parses XML with defusedxml."""
     # A file object, not the path: openpyxl refuses paths without an Excel extension, and
     # uploads arrive as extensionless temp files. Read-only mode keeps reading it, so it stays

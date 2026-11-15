@@ -25,6 +25,8 @@ from schemalab.api.datasets import router as datasets_router
 from schemalab.api.er import router as er_router
 from schemalab.api.gateway import get_gateway
 from schemalab.api.lab import router as lab_router
+from schemalab.api.lakehouse import LakeDir, published
+from schemalab.api.lakehouse import router as lakehouse_router
 from schemalab.api.normalize import router as normalize_router
 from schemalab.api.pins import router as pins_router
 from schemalab.api.theory import router as theory_router
@@ -38,8 +40,9 @@ class AskRequest(BaseModel):
     question: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
     ]
-    # "sample": the built-in datasets. "mine": the caller's uploaded tables.
-    dataset: Literal["sample", "mine"] = "sample"
+    # "sample": the built-in datasets. "mine": the caller's uploaded tables. "lake": the silver
+    # and gold tables of the caller's lakehouse.
+    dataset: Literal["sample", "mine", "lake"] = "sample"
     # For "mine": let the model see the distinct values of short text columns.
     share_categories: bool = False
 
@@ -77,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(theory_router)
     app.include_router(bench_router)
     app.include_router(assignments_router)
+    app.include_router(lakehouse_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -88,6 +92,7 @@ def create_app() -> FastAPI:
         body: AskRequest,
         db_path: Annotated[Path, Depends(get_db_path)],
         uploads_dir: UploadsDir,
+        lake_dir: LakeDir,
         gateway: Annotated[Gateway, Depends(get_gateway)],
         settings: Annotated[Settings, Depends(get_settings)],
         engine: Annotated[Engine, Depends(get_engine)],
@@ -96,6 +101,13 @@ def create_app() -> FastAPI:
             db_path = user_db(uploads_dir, user)
             if not db_path.exists():
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a file first.")
+        elif body.dataset == "lake":
+            db_path = published(lake_dir, user)
+            if not db_path.exists():
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Build a silver or gold table in the lakehouse first.",
+                )
         with engine.connect() as conn:
             notes = [c["text"] for c in store.list_corrections(conn, user["id"])]
 

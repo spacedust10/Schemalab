@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     bench_dir: str = "data/bench"
     # DuckDB files built from assignments' sample and hidden data; a cache, safe to delete.
     assignments_dir: str = "data/assignments"
+    # Lakehouse (Day 19): the ingest service's URL (empty turns it off) and the folder shared
+    # with it, holding handed-over files (inbox/) and each user's published lake (publish/).
+    ingest_url: str = ""
+    ingest_token: str = ""  # shared with the ingest service, which refuses calls without it
+    lake_dir: str = "data/lake"
     # Any signed-in user may run the benchmarks at scale 0.01; larger scales take minutes of
     # server time, so only these accounts (emails) may start them.
     bench_operators: list[str] = []

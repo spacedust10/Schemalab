@@ -28,6 +28,7 @@ from sqlalchemy import (
     delete,
     insert,
     select,
+    update,
 )
 from sqlalchemy.exc import IntegrityError
 
@@ -142,6 +143,29 @@ _DUMMY_HASH = _hasher.hash("not a real password")
 
 class EmailTakenError(ValueError):
     """An account with this email already exists."""
+
+
+lake_runs = Table(
+    "lake_runs",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("kind", String(20), nullable=False),  # file, sheet, quakes, transform
+    Column("label", String(255), nullable=False),
+    Column("status", String(20), nullable=False),  # running, done, failed
+    Column("result", JSON),  # rows loaded per table
+    Column("error", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True)),
+)
+
+# One row per user: their silver and gold SELECT models, in order, as JSON.
+lake_models = Table(
+    "lake_models",
+    metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("models", JSON, nullable=False),
+)
 
 
 def make_engine(url: str) -> Engine:
@@ -350,3 +374,58 @@ def _now() -> datetime:
 def _aware(dt: datetime) -> datetime:
     # SQLite returns naive datetimes; values are always written in UTC.
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def add_lake_run(conn: Connection, user_id: int, kind: str, label: str) -> int:
+    row = conn.execute(
+        insert(lake_runs)
+        .values(user_id=user_id, kind=kind, label=label, status="running", created_at=_now())
+        .returning(lake_runs.c.id)
+    ).one()
+    return int(row.id)
+
+
+def finish_lake_run(
+    conn: Connection, run_id: int, result: dict[str, int] | None, error: str | None
+) -> None:
+    conn.execute(
+        update(lake_runs)
+        .where(lake_runs.c.id == run_id)
+        .values(
+            status="failed" if error else "done", result=result, error=error, finished_at=_now()
+        )
+    )
+
+
+def list_lake_runs(conn: Connection, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        select(lake_runs)
+        .where(lake_runs.c.user_id == user_id)
+        .order_by(lake_runs.c.id.desc())
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "id": r.id,
+            "kind": r.kind,
+            "label": r.label,
+            "status": r.status,
+            "result": r.result,
+            "error": r.error,
+            "created_at": _aware(r.created_at).isoformat(),
+            "finished_at": _aware(r.finished_at).isoformat() if r.finished_at else None,
+        }
+        for r in rows
+    ]
+
+
+def get_lake_models(conn: Connection, user_id: int) -> list[dict[str, str]]:
+    row = conn.execute(
+        select(lake_models.c.models).where(lake_models.c.user_id == user_id)
+    ).one_or_none()
+    return list(row.models) if row else []
+
+
+def set_lake_models(conn: Connection, user_id: int, models: list[dict[str, str]]) -> None:
+    conn.execute(delete(lake_models).where(lake_models.c.user_id == user_id))
+    conn.execute(insert(lake_models).values(user_id=user_id, models=models))
