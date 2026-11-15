@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/api";
 import { contentSecurityPolicy } from "@/lib/csp";
 
-const SIGNED_IN = /^\/(data|dashboard|normalize|er|algebra|lab|theory|plans|bench|patterns|pipelines|assignments(\/[^/]+(\/dashboard)?)?)?$/;
+const SIGNED_IN = /^\/(data|dashboard|normalize|er|algebra|lab|theory|plans|bench|patterns|pipelines|lakehouse|assignments(\/[^/]+(\/dashboard)?)?)?$/;
 
 /**
  * Gives every page a fresh script nonce in its Content-Security-Policy; Next.js reads it

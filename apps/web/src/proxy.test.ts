@@ -22,6 +22,7 @@ describe("the proxy", () => {
   it("still sends a signed-out visitor to sign in", () => {
     const res = get("/assignments/7");
     expect(res.headers.get("location")).toBe("http://localhost/login");
+    expect(get("/lakehouse").headers.get("location")).toBe("http://localhost/login");
   });
 
   it("lets a signed-in visitor through", () => {
