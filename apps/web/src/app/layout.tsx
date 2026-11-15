@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Atkinson_Hyperlegible, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import { connection } from "next/server";
 import "./globals.css";
 
 // Serif for findings and prose, a legibility-first sans for the UI, mono for SQL.
@@ -19,7 +20,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // Render on each request: the script nonce (proxy.ts) is new every time, and a page
+  // built ahead of time would carry none, so the CSP would block its scripts.
+  await connection();
   return (
     <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
       <body>

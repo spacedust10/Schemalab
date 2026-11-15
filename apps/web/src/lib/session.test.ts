@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST as ask } from "../app/api/ask/route";
@@ -153,9 +154,15 @@ describe("cross-site protection", () => {
   });
 });
 
-describe("proxy matcher", () => {
-  it("guards every signed-in page", async () => {
-    const { config } = await import("../proxy");
-    expect(config.matcher).toEqual(["/", "/data", "/dashboard", "/normalize", "/er", "/algebra", "/lab", "/theory", "/plans", "/bench", "/patterns", "/pipelines", "/assignments", "/assignments/:id", "/assignments/:id/dashboard"]);
+describe("proxy guard", () => {
+  it("guards every page but sign-in", () => {
+    const pages = readdirSync(new URL("../app", import.meta.url), { recursive: true, encoding: "utf8" })
+      .filter((f) => f.endsWith("page.tsx"))
+      .map((f) => `/${f.replace(/\/?page\.tsx$/, "").replace(/\[[^\]]+\]/g, "7")}`);
+    expect(pages.length).toBeGreaterThan(10);
+    for (const path of pages) {
+      const location = proxy(req(path)).headers.get("location");
+      expect(location, path).toBe(path === "/login" ? null : "http://localhost:3000/login");
+    }
   });
 });

@@ -8,7 +8,7 @@ const directives = (csp: string) =>
 
 describe("the Content-Security-Policy", () => {
   it("keeps every request on this site and lets DuckDB-WASM compile", () => {
-    const d = directives(contentSecurityPolicy(false));
+    const d = directives(contentSecurityPolicy(false, "abc"));
     expect(d["default-src"]).toEqual(["'self'"]);
     expect(d["connect-src"]).toEqual(["'self'"]); // the scratchpad cannot reach another site
     expect(d["script-src"]).toContain("'wasm-unsafe-eval'");
@@ -18,14 +18,20 @@ describe("the Content-Security-Policy", () => {
     expect(d["object-src"]).toEqual(["'none'"]);
   });
 
-  it("allows eval only in development, for hot reload", () => {
-    expect(directives(contentSecurityPolicy(true))["script-src"]).toContain("'unsafe-eval'");
+  it("runs only scripts carrying this request's nonce, never other inline scripts", () => {
+    const scripts = directives(contentSecurityPolicy(false, "abc"))["script-src"];
+    expect(scripts).toContain("'nonce-abc'");
+    expect(scripts).not.toContain("'unsafe-inline'");
   });
 
-  it("is sent on every page", async () => {
+  it("allows eval only in development, for hot reload", () => {
+    expect(directives(contentSecurityPolicy(true, "abc"))["script-src"]).toContain("'unsafe-eval'");
+  });
+
+  it("is left to the proxy: a second, static policy would block the nonced scripts", async () => {
     const rules = await nextConfig.headers!();
-    const all = rules.find((r) => r.source === "/:path*");
-    expect(all?.headers.map((h) => h.key)).toContain("Content-Security-Policy");
+    const keys = rules.flatMap((r) => r.headers.map((h) => h.key));
+    expect(keys).not.toContain("Content-Security-Policy");
   });
 });
 

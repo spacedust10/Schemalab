@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import { contentSecurityPolicy } from "./src/lib/csp";
 
 const nextConfig: NextConfig = {
   // Standalone output keeps the Docker image to the server and its traced deps.
@@ -7,9 +6,9 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // The Content-Security-Policy is per request, so proxy.ts sends it.
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: contentSecurityPolicy(process.env.NODE_ENV === "development") },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "same-origin" },
         ],
