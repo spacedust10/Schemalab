@@ -16,3 +16,18 @@ export function histogram(scores: number[]): number[] {
   for (const s of scores) bands[Math.min(9, Math.floor(s / 10))] += 1;
   return bands;
 }
+
+export function median(scores: number[]): number {
+  const s = [...scores].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/** The dashboard's opening finding: how many reached full marks, and where the middle is. */
+export function takeaway(scores: number[]): string {
+  const full = scores.filter((s) => s === 100).length;
+  if (full === scores.length) return `All ${scores.length} students reached full marks.`;
+  const first = full === 0 ? "No student has full marks yet." : `${full} of ${scores.length} students reached full marks.`;
+  const m = median(scores);
+  return `${first} Half scored ${Number.isInteger(m) ? m : m.toFixed(1)} or more.`;
+}

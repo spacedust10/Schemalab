@@ -4,12 +4,10 @@ import * as Plot from "@observablehq/plot";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { validId } from "@/lib/assignments";
-import { type Answer, type Dashboard, histogram } from "@/lib/dashboard";
+import { type Answer, type Dashboard, histogram, median, takeaway } from "@/lib/dashboard";
 import { fmt } from "@/lib/format";
 import { errorText } from "@/lib/post";
 import { useTokens, useWidth } from "./ResultChart";
-
-const BANDS = ["0–9", "10–19", "20–29", "30–39", "40–49", "50–59", "60–69", "70–79", "80–89", "90–100"];
 
 export function AssignmentDashboard({ id }: { id: string }) {
   const router = useRouter();
@@ -19,6 +17,8 @@ export function AssignmentDashboard({ id }: { id: string }) {
   const [answers, setAnswers] = useState<{ email: string; list: Answer[] } | null>(null);
   const [matched, setMatched] = useState<{ csv: string; unmatched: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const best = useMemo(() => data?.students.map((x) => x.best) ?? [], [data]);
 
   const load = useCallback(() => {
     if (!ok) return Promise.resolve();
@@ -64,20 +64,22 @@ export function AssignmentDashboard({ id }: { id: string }) {
     <main id="main" className="er-page">
       <header className="data-head">
         <h1>{data.title}: dashboard</h1>
-        <p className="lede">
+        <p className="lede">{best.length ? takeaway(best) : "No one has submitted an answer yet."}</p>
+        <p className="hint">
           {s.students} student{s.students === 1 ? "" : "s"}, {s.submissions} submission{s.submissions === 1 ? "" : "s"}.
           {s.mean !== undefined && ` Best scores: mean ${fmt(s.mean)}, median ${fmt(s.median)}, from ${s.min} to ${s.max}.`}
         </p>
       </header>
 
-      {s.students > 0 && <ScoreChart scores={data.students.map((x) => x.best)} />}
+      {best.length > 0 && <ScoreChart scores={best} />}
 
       <section aria-labelledby="dash-tests">
         <h2 id="dash-tests">Tests passed by students&apos; latest answers</h2>
         <ul className="notes">
-          {data.tests.map((t) => (
+          {data.tests.map((t, i) => (
             <li key={t.name}>
-              <strong>{t.name}:</strong> {t.of ? `${t.passed} of ${t.of} (${Math.round((100 * t.passed) / t.of)}%)` : "no answers yet"}
+              <strong>{t.name}</strong> {i === 0 ? "(the sample students can see)" : "(hidden)"}:{" "}
+              {t.of ? `${t.passed} of ${t.of} (${Math.round((100 * t.passed) / t.of)}%)` : "no answers yet"}
             </li>
           ))}
         </ul>
@@ -154,27 +156,33 @@ function ScoreChart({ scores }: { scores: number[] }) {
   const width = useWidth(ref);
   const c = useTokens();
   const counts = useMemo(() => histogram(scores), [scores]);
+  const middle = useMemo(() => median(scores), [scores]);
   useEffect(() => {
     const el = ref.current;
     if (!el || !width) return;
-    const data = counts.map((n, i) => ({ band: BANDS[i], n }));
+    const bars = counts.map((n, i) => ({ x1: i * 10, x2: i * 10 + 10, n }));
     const chart = Plot.plot({
       width,
       height: 220,
+      marginTop: 28,
       style: { fontFamily: "var(--sans)", fontSize: "12px", color: c.ink, background: "transparent" },
-      x: { label: "Best score", domain: BANDS },
+      x: { label: "Best score", domain: [0, 100], ticks: 10 },
       // Whole students only: no more ticks than the tallest bar, so none fall between counts.
       y: { label: "Students", grid: true, ticks: Math.min(5, Math.max(1, ...counts)), tickFormat: "d" },
-      marks: [Plot.barY(data, { x: "band", y: "n", fill: c.mark }), Plot.ruleY([0], { stroke: c.ink })],
+      marks: [
+        Plot.rectY(bars, { x1: "x1", x2: "x2", y: "n", fill: c.muted, insetLeft: 1, insetRight: 1 }),
+        Plot.ruleY([0], { stroke: c.ink }),
+        Plot.ruleX([middle], { stroke: c.mark, strokeWidth: 2 }),
+        Plot.text([middle], { x: (d: number) => d, frameAnchor: "top", dy: -14, text: (d: number) => `median ${fmt(d)}`, fill: c.ink }),
+      ],
     });
     el.replaceChildren(chart);
     return () => chart.remove();
-  }, [counts, width, c]);
-  const top = counts.indexOf(Math.max(...counts));
+  }, [counts, middle, width, c]);
   return (
     <figure className="figure">
-      <div ref={ref} role="img" aria-label={`Best scores in bands of ten. Most students scored ${BANDS[top]}.`} />
-      <figcaption>Best score per student, in bands of ten.</figcaption>
+      <div ref={ref} role="img" aria-label={`${takeaway(scores)} Histogram of best scores in bands of ten, median ${fmt(middle)}.`} />
+      <figcaption>Best score per student, in bands of ten; the line marks the median, {fmt(middle)}.</figcaption>
     </figure>
   );
 }

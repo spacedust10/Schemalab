@@ -4,11 +4,24 @@ import { GET as canvasCsv, POST as canvasMatched } from "../app/api/assignments/
 import { GET as dashboard } from "../app/api/assignments/[id]/dashboard/route";
 import { GET as answers } from "../app/api/assignments/[id]/submissions/route";
 import { SESSION_COOKIE } from "./api";
-import { histogram } from "./dashboard";
+import { histogram, median, takeaway } from "./dashboard";
 
 describe("score histogram", () => {
   it("counts best scores in bands of ten, 100 in the top band", () => {
     expect(histogram([0, 9, 10, 55, 100, 100])).toEqual([2, 1, 0, 0, 0, 1, 0, 0, 0, 2]);
+  });
+});
+
+describe("the dashboard's takeaway", () => {
+  it("finds the median of best scores", () => {
+    expect(median([65, 100])).toBe(82.5);
+    expect(median([30, 65, 100])).toBe(65);
+  });
+
+  it("says in one sentence how the class did", () => {
+    expect(takeaway([65, 100])).toBe("1 of 2 students reached full marks. Half scored 82.5 or more.");
+    expect(takeaway([100, 100])).toBe("All 2 students reached full marks.");
+    expect(takeaway([40])).toBe("No student has full marks yet. Half scored 40 or more.");
   });
 });
 
