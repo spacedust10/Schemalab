@@ -42,13 +42,21 @@ services:
       SCHEMALAB_LAB_ADMIN_DSN: postgresql://lab:${LAB_DB_PASSWORD:-lab}@labdb:5432/lab
       # JSON list of emails allowed to run benchmarks above scale 0.01, e.g. '["you@example.com"]'
       SCHEMALAB_BENCH_OPERATORS: ${BENCH_OPERATORS:-[]}
+      SCHEMALAB_INGEST_URL: http://ingest:8100
+      SCHEMALAB_INGEST_TOKEN: ${INGEST_TOKEN:?run scripts/lake-env.sh}
+      SCHEMALAB_LAKE_DIR: /app/data/lake
     extra_hosts: ["host.docker.internal:host-gateway"]
-    volumes: ["./data/samples:/app/data/samples:ro", "uploads:/app/data/uploads", "bench:/app/data/bench"]
+    volumes:
+      - ./data/samples:/app/data/samples:ro
+      - uploads:/app/data/uploads
+      - bench:/app/data/bench
+      - lakeshare:/app/data/lake  # inbox/ to hand files over, publish/ for Ask
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
-    networks: [app, lab]
+    networks: [app, lab, ingest]
     depends_on:
       postgres: { condition: service_healthy }
       labdb: { condition: service_healthy }
+      ingest: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
@@ -60,10 +68,10 @@ services:
     image: dxflrs/garage:v2.5.0
     command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
-      # Dev defaults; set your own in .env. The key id is GK + 24 hex, the secret 64 hex.
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-4f0c1c6a3d2b5e8f9a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f}
-      GARAGE_DEFAULT_ACCESS_KEY: ${LAKE_S3_KEY:-GK0123456789abcdef01234567}
-      GARAGE_DEFAULT_SECRET_KEY: ${LAKE_S3_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      # No defaults: run scripts/lake-env.sh once to put random values in .env.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?run scripts/lake-env.sh}
+      GARAGE_DEFAULT_ACCESS_KEY: ${LAKE_S3_KEY:?run scripts/lake-env.sh}
+      GARAGE_DEFAULT_SECRET_KEY: ${LAKE_S3_SECRET:?run scripts/lake-env.sh}
       GARAGE_DEFAULT_BUCKET: lake
     volumes: ["./ingest/garage.toml:/etc/garage.toml:ro", "garage:/var/lib/garage"]
     networks: [lake]
@@ -76,7 +84,7 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: lake
-      POSTGRES_PASSWORD: ${LAKE_DB_PASSWORD:-lake}
+      POSTGRES_PASSWORD: ${LAKE_DB_PASSWORD:?run scripts/lake-env.sh}
       POSTGRES_DB: lake
     volumes: [lakedata:/var/lib/postgresql/data]
     networks: [lake]
@@ -88,11 +96,12 @@ services:
   ingest:
     build: { context: ., dockerfile: Dockerfile.ingest }
     environment:
-      INGEST_CATALOG: postgresql://lake:${LAKE_DB_PASSWORD:-lake}@lakedb:5432/lake
+      INGEST_CATALOG: postgresql://lake:${LAKE_DB_PASSWORD:?run scripts/lake-env.sh}@lakedb:5432/lake
       INGEST_DATA_ROOT: s3://lake
       INGEST_S3_ENDPOINT: garage:3900
-      INGEST_S3_KEY: ${LAKE_S3_KEY:-GK0123456789abcdef01234567}
-      INGEST_S3_SECRET: ${LAKE_S3_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      INGEST_S3_KEY: ${LAKE_S3_KEY:?run scripts/lake-env.sh}
+      INGEST_S3_SECRET: ${LAKE_S3_SECRET:?run scripts/lake-env.sh}
+      INGEST_TOKEN: ${INGEST_TOKEN:?run scripts/lake-env.sh}
       INGEST_PUBLISH_DIR: /data/lake/publish
       INGEST_INBOX_DIR: /data/lake/inbox
     volumes: ["lakeshare:/data/lake"]

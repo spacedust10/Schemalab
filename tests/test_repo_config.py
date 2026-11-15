@@ -102,14 +102,15 @@ def test_lab_database_is_reachable_only_by_the_api() -> None:
 
 def test_lab_database_sits_on_its_own_internal_network() -> None:
     # The sandbox runs users' SQL: it must not share a network with the app database or reach
-    # the internet. Only the API joins both networks.
+    # the internet. Only the API joins both (and the internal one to the lakehouse loader).
     compose = load("docker-compose.yml")
     services = compose["services"]
     assert compose["networks"]["lab"]["internal"] is True
     assert services["labdb"]["networks"] == ["lab"]
     assert "lab" not in services["postgres"]["networks"]
     assert "lab" not in services["web"]["networks"]
-    assert set(services["api"]["networks"]) == {"app", "lab"}
+    assert set(services["api"]["networks"]) == {"app", "lab", "ingest"}
+    assert "lab" not in services["ingest"]["networks"]
 
 
 def test_api_image_ships_the_tpc_extensions_and_a_bench_volume() -> None:
@@ -133,3 +134,35 @@ def test_web_image_serves_the_public_folder() -> None:
     # The scratchpad's DuckDB-WASM files are copied into public/ at build time.
     dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text()
     assert "COPY --from=build /app/public ./public" in dockerfile
+
+
+LAKE_SECRETS = (
+    "GARAGE_RPC_SECRET",
+    "LAKE_S3_KEY",
+    "LAKE_S3_SECRET",
+    "LAKE_DB_PASSWORD",
+    "INGEST_TOKEN",
+)
+
+
+def test_lake_secrets_have_no_committed_defaults() -> None:
+    # `${X:?...}`: Compose stops with a message unless .env sets it (scripts/lake-env.sh does).
+    text = (ROOT / "docker-compose.yml").read_text()
+    for name in LAKE_SECRETS:
+        assert f"${{{name}:-" not in text, name
+        assert f"${{{name}:?" in text, name
+
+
+def test_the_lake_is_reachable_only_through_ingest() -> None:
+    compose = load("docker-compose.yml")
+    services, networks = compose["services"], compose["networks"]
+    assert networks["lake"] == {"internal": True}
+    assert networks["ingest"] == {"internal": True}
+    for name in ("garage", "lakedb", "ingest"):
+        assert "ports" not in services[name], name
+    assert services["garage"]["networks"] == ["lake"]
+    assert services["lakedb"]["networks"] == ["lake"]
+    assert set(services["ingest"]["networks"]) == {"lake", "ingest", "egress"}
+    assert "ingest" in services["api"]["networks"]
+    assert "lake" not in services["api"]["networks"]
+    assert services["api"]["environment"]["SCHEMALAB_INGEST_URL"] == "http://ingest:8100"
