@@ -6,11 +6,13 @@ SIS User ID, then SIS Login ID, never by email. Schemalab knows students only by
 default the email goes in Student and SIS Login ID, which matches where a school's logins are
 emails. A teacher can also pass their own Canvas gradebook export: students whose SIS Login ID
 is their email then get Canvas's own ID, SIS User ID, name and section, which always match.
-The export is read, not kept.
+Its column for the same assignment (headed "Title (12345)") is reused, so the import updates
+that assignment instead of creating a second one. The export is read, not kept.
 """
 
 import csv
 import io
+import re
 
 COLUMNS = ["Student", "ID", "SIS User ID", "SIS Login ID", "Section"]
 POINTS = 100
@@ -41,6 +43,20 @@ def _roster(export: str) -> dict[str, list[str]]:
     return out
 
 
+_HEADER = re.compile(r"^(?P<title>.*) \((?P<id>\d+)\)$")
+
+
+def _column(title: str, export: str) -> str:
+    """The export's own header for this assignment ("Title (12345)"), so importing updates
+    that Canvas assignment; the bare title, which makes Canvas create one, if none matches."""
+    header = next(csv.reader(io.StringIO(export.lstrip("\ufeff"))), [])
+    for cell in header[len(COLUMNS) :]:
+        found = _HEADER.match(cell.strip())
+        if found and found["title"].strip() == title.strip():
+            return cell.strip()
+    return title
+
+
 def gradebook(
     title: str, scores: list[tuple[str, int]], export: str | None = None
 ) -> tuple[str, list[str]]:
@@ -48,7 +64,7 @@ def gradebook(
     roster = _roster(export) if export else {}
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
-    writer.writerow([*COLUMNS, defuse(title)])
+    writer.writerow([*COLUMNS, defuse(_column(title, export) if export else title)])
     writer.writerow(["Points Possible", "", "", "", "", str(POINTS)])
     unmatched = []
     for email, score in scores:

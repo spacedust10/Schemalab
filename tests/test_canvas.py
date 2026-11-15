@@ -18,3 +18,24 @@ def test_cells_a_spreadsheet_could_run_are_prefixed(cell: str) -> None:
 )
 def test_ordinary_cells_are_left_alone(cell: str) -> None:
     assert defuse(cell) == cell
+
+
+EXPORT = (
+    "Student,ID,SIS User ID,SIS Login ID,Section,Customers without an email (77),Quiz 1 (78)\n"
+    "    Points Possible,,,,,100,10\n"
+    '"Lovelace, Ada",501,U1001,ada@umich.edu,CIS 545 001,,9\n'
+)
+
+
+def test_the_export_s_own_column_is_reused_so_canvas_updates_that_assignment() -> None:
+    from schemalab.canvas import gradebook
+
+    text, _ = gradebook("Customers without an email", [("ada@umich.edu", 100)], EXPORT)
+    assert text.splitlines()[0].endswith(",Customers without an email (77)")
+
+
+def test_without_a_matching_column_the_bare_title_makes_a_new_assignment() -> None:
+    from schemalab.canvas import gradebook
+
+    text, _ = gradebook("Top earners", [("ada@umich.edu", 100)], EXPORT)
+    assert text.splitlines()[0].endswith(",Top earners")
