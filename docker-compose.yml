@@ -54,6 +54,59 @@ services:
       interval: 5s
       retries: 10
 
+  # Lakehouse (Day 19): object storage, the DuckLake catalog, and the dlt loader.
+  # Garage stands in for MinIO, whose community edition no longer ships images.
+  garage:
+    image: dxflrs/garage:v2.5.0
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      # Dev defaults; set your own in .env. The key id is GK + 24 hex, the secret 64 hex.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-4f0c1c6a3d2b5e8f9a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f}
+      GARAGE_DEFAULT_ACCESS_KEY: ${LAKE_S3_KEY:-GK0123456789abcdef01234567}
+      GARAGE_DEFAULT_SECRET_KEY: ${LAKE_S3_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      GARAGE_DEFAULT_BUCKET: lake
+    volumes: ["./ingest/garage.toml:/etc/garage.toml:ro", "garage:/var/lib/garage"]
+    networks: [lake]
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      retries: 10
+
+  lakedb:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lake
+      POSTGRES_PASSWORD: ${LAKE_DB_PASSWORD:-lake}
+      POSTGRES_DB: lake
+    volumes: [lakedata:/var/lib/postgresql/data]
+    networks: [lake]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lake"]
+      interval: 5s
+      retries: 10
+
+  ingest:
+    build: { context: ., dockerfile: Dockerfile.ingest }
+    environment:
+      INGEST_CATALOG: postgresql://lake:${LAKE_DB_PASSWORD:-lake}@lakedb:5432/lake
+      INGEST_DATA_ROOT: s3://lake
+      INGEST_S3_ENDPOINT: garage:3900
+      INGEST_S3_KEY: ${LAKE_S3_KEY:-GK0123456789abcdef01234567}
+      INGEST_S3_SECRET: ${LAKE_S3_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      INGEST_PUBLISH_DIR: /data/lake/publish
+      INGEST_INBOX_DIR: /data/lake/inbox
+    volumes: ["lakeshare:/data/lake"]
+    # lake: storage and catalog (no way out). ingest: only the API calls in.
+    # egress: the USGS feed and Google Sheets. Not on app or lab, so no route to their databases.
+    networks: [lake, ingest, egress]
+    depends_on:
+      garage: { condition: service_healthy }
+      lakedb: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 5s
+      retries: 10
+
   web:
     build: apps/web
     environment:
@@ -66,8 +119,14 @@ services:
 networks:
   app: {}
   lab: { internal: true }
+  lake: { internal: true }
+  ingest: { internal: true }
+  egress: {}
 
 volumes:
   pgdata:
   uploads:
   bench:
+  garage:
+  lakedata:
+  lakeshare:
