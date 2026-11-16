@@ -162,7 +162,7 @@ def test_the_lake_is_reachable_only_through_ingest() -> None:
         assert "ports" not in services[name], name
     assert services["garage"]["networks"] == ["lake"]
     assert services["lakedb"]["networks"] == ["lake"]
-    assert set(services["ingest"]["networks"]) == {"lake", "ingest", "egress"}
+    assert set(services["ingest"]["networks"]) == {"lake", "ingest", "outbound"}
     assert "ingest" in services["api"]["networks"]
     assert "lake" not in services["api"]["networks"]
     assert services["api"]["environment"]["SCHEMALAB_INGEST_URL"] == "http://ingest:8100"
@@ -173,3 +173,36 @@ def test_the_quick_start_makes_the_lake_secrets_compose_requires() -> None:
     start = readme[readme.index("## Quick start") :]
     assert start.index("lake-env.sh") < start.index("docker compose up")
     assert (ROOT / "scripts" / "lake-env.sh").stat().st_mode & 0o111
+
+
+def test_ingest_reaches_the_internet_only_through_the_allow_list_proxy() -> None:
+    # Fixed hosts in code are the first wall; the proxy is the second, for a bug or a
+    # compromised dependency in ingest. Only the proxy sits on the routable network.
+    compose = load("docker-compose.yml")
+    services, networks = compose["services"], compose["networks"]
+    assert networks["outbound"] == {"internal": True}
+    assert "egress" not in services["ingest"]["networks"]
+    assert set(services["proxy"]["networks"]) == {"outbound", "egress"}
+    assert [n for n, s in services.items() if "egress" in s.get("networks", [])] == ["proxy"]
+    assert re.fullmatch(r"ubuntu/squid:[\d.]+-[\d.]+_\w+", services["proxy"]["image"])
+    assert "ports" not in services["proxy"]
+    env = services["ingest"]["environment"]
+    assert env["HTTPS_PROXY"] == "http://proxy:3128"
+    assert set(env["NO_PROXY"].split(",")) == {"garage", "lakedb"}
+
+
+def test_the_proxy_allows_only_the_source_hosts_over_connect_443() -> None:
+    hosts = (ROOT / "ingest" / "proxy" / "allowed-hosts.txt").read_text().split()
+    assert hosts == ["earthquake.usgs.gov", "docs.google.com", ".googleusercontent.com"]
+    rules = [
+        line.split()
+        for line in (ROOT / "ingest" / "proxy" / "squid.conf").read_text().splitlines()
+        if line.startswith("http_access")
+    ]
+    # Plain HTTP and other ports are refused before the host list is consulted.
+    assert rules == [
+        ["http_access", "deny", "!CONNECT"],
+        ["http_access", "deny", "!SSL_ports"],
+        ["http_access", "allow", "allowed"],
+        ["http_access", "deny", "all"],
+    ]

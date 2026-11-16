@@ -1,0 +1,3 @@
+earthquake.usgs.gov
+docs.google.com
+.googleusercontent.com
