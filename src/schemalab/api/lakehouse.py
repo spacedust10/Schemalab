@@ -40,9 +40,13 @@ SUFFIXES = (".csv", ".xlsx", ".parquet")
 TOO_LARGE = f"Files can be at most {uploads.MAX_BYTES // (1024 * 1024)} MB."
 UNAVAILABLE = "The lakehouse service is not answering. Try again in a minute."
 
+# ponytail: in-process state, right for the one uvicorn worker Dockerfile.api starts. With
+# several workers the caps would be per worker; move them to Postgres (advisory locks) then.
 _LOCK = threading.Lock()
 _ACTIVE: set[int] = set()  # users with a run going in this process
+_RUNNING: set[int] = set()  # run ids this process is running; any other "running" row is stale
 _SLOTS = threading.BoundedSemaphore(MAX_RUNS)
+INTERRUPTED = "The run was interrupted. Start it again."
 
 
 def _spawn(job: Callable[[], None]) -> None:
@@ -98,6 +102,8 @@ def _start(
     except BaseException:
         _release(user_id)
         raise
+    with _LOCK:
+        _RUNNING.add(run_id)
 
     def work() -> None:
         result, error = None, None
@@ -115,6 +121,8 @@ def _start(
                 with engine.begin() as conn:
                     store.finish_lake_run(conn, run_id, result, error)
             finally:
+                with _LOCK:
+                    _RUNNING.discard(run_id)
                 _release(user_id)
 
     _spawn(work)
@@ -133,18 +141,27 @@ def _call(fn: Callable[[], Any]) -> Any:
 @router.get("")
 def overview(user: UserDep, ingest: IngestDep, engine: EngineDep) -> dict[str, Any]:
     lake = lake_of(user)
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         runs = store.list_lake_runs(conn, user["id"])
+        for run in runs:
+            # A run no thread here is running was cut off by a restart: record that for good.
+            if run["status"] == "running" and run["id"] not in _RUNNING:
+                store.finish_lake_run(conn, run["id"], None, INTERRUPTED)
+                run.update(status="failed", error=INTERRUPTED)
         models = store.get_lake_models(conn, user["id"])
-    for run in runs:
-        # A run this process is not running was cut off by a restart.
-        if run["status"] == "running" and user["id"] not in _ACTIVE:
-            run.update(status="failed", error="The run was interrupted. Start it again.")
+    # Runs and models live here, so they still show when ingest is down.
+    try:
+        tables, snapshots, available = ingest.tables(lake), ingest.snapshots(lake), True
+    except Unavailable:
+        tables, snapshots, available = [], [], False
+    except LakehouseError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
     return {
-        "tables": _call(lambda: ingest.tables(lake)),
-        "snapshots": _call(lambda: ingest.snapshots(lake)),
+        "tables": tables,
+        "snapshots": snapshots,
         "runs": runs,
         "models": models,
+        "available": available,
     }
 
 
@@ -229,7 +246,12 @@ async def load_file(
                 (inbox / file).unlink(missing_ok=True)
         return counts
 
-    return _start(engine, user["id"], "file", name, job)
+    try:
+        return _start(engine, user["id"], "file", name, job)
+    except BaseException:
+        for file, _ in handed:
+            (inbox / file).unlink(missing_ok=True)
+        raise
 
 
 @router.post("/quakes", status_code=status.HTTP_202_ACCEPTED)

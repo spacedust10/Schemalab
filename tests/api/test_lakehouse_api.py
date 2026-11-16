@@ -216,6 +216,7 @@ def test_a_run_lost_to_a_restart_shows_as_interrupted(
     headers = register(client)
     client.post("/lakehouse/quakes", headers=headers)
     api._ACTIVE.clear()  # what a restart leaves behind
+    api._RUNNING.clear()
     api._SLOTS.release()
     [run] = runs(client, headers)
     assert run["status"] == "failed"
@@ -332,3 +333,55 @@ def test_ask_on_an_empty_lake_says_what_to_do(
     )
     assert resp.status_code == 400
     assert "silver or gold" in resp.json()["detail"]
+
+
+def test_an_interrupted_run_stays_failed_once_a_new_one_starts(
+    client: TestClient, ingest: FakeIngest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held: list[Callable[[], None]] = []
+    monkeypatch.setattr(api, "_spawn", held.append)
+    headers = register(client)
+    client.post("/lakehouse/quakes", headers=headers)
+    api._ACTIVE.clear()  # a restart: the first run's thread is gone
+    api._RUNNING.clear()
+    api._SLOTS.release()
+    held.clear()
+    client.post("/lakehouse/quakes", headers=headers)  # still going
+    assert [r["status"] for r in runs(client, headers)] == ["running", "failed"]
+    held[0]()
+    assert [r["status"] for r in runs(client, headers)] == ["done", "failed"]
+
+
+def test_runs_and_models_still_show_when_ingest_is_down(
+    client: TestClient, ingest: FakeIngest
+) -> None:
+    headers = register(client)
+    client.put("/lakehouse/models", json={"models": GOOD}, headers=headers)
+    client.post("/lakehouse/quakes", headers=headers)
+
+    def down(lake: str) -> Any:
+        raise lakehouse.Unavailable("connection refused")
+
+    ingest.tables = down  # type: ignore[method-assign]
+    body = client.get("/lakehouse", headers=headers).json()
+    assert body["available"] is False
+    assert body["tables"] == [] and body["snapshots"] == []
+    assert len(body["runs"]) == 1 and body["models"] == GOOD
+
+
+def test_handed_files_are_removed_if_the_run_cannot_be_recorded(
+    client: TestClient, ingest: FakeIngest, lake_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from schemalab import store
+
+    def broken(*args: Any) -> int:
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(store, "add_lake_run", broken)
+    headers = register(client)
+    with pytest.raises(RuntimeError):
+        send(client, headers, b"id\n1\n", "a.csv")
+    assert list((lake_dir / "inbox").iterdir()) == []
+    monkeypatch.undo()
+    monkeypatch.setattr(api, "_spawn", lambda job: job())
+    assert send(client, headers, b"id\n1\n", "a.csv").status_code == 202  # the slot came back
