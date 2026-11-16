@@ -17,6 +17,8 @@ from ingest import sources
 from ingest.config import Settings
 
 _FILE = re.compile(r"[A-Za-z0-9_-]{1,64}\.(csv|parquet)")
+# ponytail: per-process, right for the one uvicorn worker the image starts; a Postgres advisory
+# lock per lake if ingest ever runs several workers or replicas.
 _LOCK = threading.Lock()
 _BUSY: set[str] = set()
 
