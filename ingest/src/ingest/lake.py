@@ -128,6 +128,8 @@ def preview(s: Settings, name: str, layer: str, table: str, version: int | None)
             rows = [[_plain(r[i]) for i in keep] for r in rel.fetchall()]
             return {"columns": columns, "rows": rows, "total": _count(con, relation)}
         except duckdb.Error as e:
+            if version is None:
+                raise LakeError("That table could not be read.") from e
             raise LakeError(f"That table did not exist at version {version}.") from e
 
 
