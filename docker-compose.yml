@@ -104,15 +104,32 @@ services:
       INGEST_TOKEN: ${INGEST_TOKEN:?run scripts/lake-env.sh}
       INGEST_PUBLISH_DIR: /data/lake/publish
       INGEST_INBOX_DIR: /data/lake/inbox
+      # requests (the sources) honours these; the lake's own hosts stay direct.
+      HTTPS_PROXY: http://proxy:3128
+      NO_PROXY: garage,lakedb
     volumes: ["lakeshare:/data/lake"]
     # lake: storage and catalog (no way out). ingest: only the API calls in.
-    # egress: the USGS feed and Google Sheets. Not on app or lab, so no route to their databases.
-    networks: [lake, ingest, egress]
+    # outbound: the proxy, its only way to the internet. Not on app or lab, so no route to
+    # their databases.
+    networks: [lake, ingest, outbound]
     depends_on:
       garage: { condition: service_healthy }
       lakedb: { condition: service_healthy }
+      proxy: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 5s
+      retries: 10
+
+  # Ingest's way out: HTTPS CONNECT to the USGS feed and Google Sheets hosts, nothing else.
+  proxy:
+    image: ubuntu/squid:6.6-24.04_edge
+    volumes:
+      - ./ingest/proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./ingest/proxy/allowed-hosts.txt:/etc/squid/allowed-hosts.txt:ro
+    networks: [outbound, egress]
+    healthcheck:
+      test: ["CMD", "squid", "-k", "check"]
       interval: 5s
       retries: 10
 
@@ -130,7 +147,8 @@ networks:
   lab: { internal: true }
   lake: { internal: true }
   ingest: { internal: true }
-  egress: {}
+  outbound: { internal: true }
+  egress: {}  # only the proxy
 
 volumes:
   pgdata:
