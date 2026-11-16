@@ -206,3 +206,10 @@ def test_the_proxy_allows_only_the_source_hosts_over_connect_443() -> None:
         ["http_access", "allow", "allowed"],
         ["http_access", "deny", "all"],
     ]
+
+
+def test_ingest_turns_off_dlt_telemetry() -> None:
+    # dlt reports runs to telemetry.scalevector.ai by default; the proxy refuses it, so the
+    # attempts would only fill its log.
+    env = load("docker-compose.yml")["services"]["ingest"]["environment"]
+    assert env["RUNTIME__DLTHUB_TELEMETRY"] == "false"

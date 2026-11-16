@@ -107,6 +107,7 @@ services:
       # requests (the sources) honours these; the lake's own hosts stay direct.
       HTTPS_PROXY: http://proxy:3128
       NO_PROXY: garage,lakedb
+      RUNTIME__DLTHUB_TELEMETRY: "false"
     volumes: ["lakeshare:/data/lake"]
     # lake: storage and catalog (no way out). ingest: only the API calls in.
     # outbound: the proxy, its only way to the internet. Not on app or lab, so no route to
