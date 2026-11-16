@@ -142,3 +142,16 @@ def test_an_allowed_semi_join_passes() -> None:
 def test_an_unknown_column_in_a_one_table_query_is_left_to_duckdb() -> None:
     # DuckDB's error names the near match; the join guard has nothing to say.
     assert check("SELECT nope FROM taxi_trips") == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM taxi_trips t, taxi_zones z "
+        "WHERE t.PULocationID IN (1, 2) AND z.LocationID IN (3)",
+        "SELECT * FROM taxi_trips t, taxi_zones z WHERE t.fare + 1 IN (1, 2)",
+    ],
+)
+def test_a_value_list_does_not_link_tables(sql: str) -> None:
+    with pytest.raises(JoinError, match="key"):
+        check(sql)

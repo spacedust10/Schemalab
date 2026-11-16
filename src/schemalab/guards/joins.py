@@ -87,9 +87,11 @@ def _scope_edges(scope: Scope) -> set[Edge]:
     linked: set[str] = set()
     for condition in conditions:
         for member in find_all_in_scope(condition, exp.In):
-            if found := _semi_join(scope, member):
+            if member.args.get("query") is None:
+                continue  # IN (1, 2, 3) is a filter: it links nothing
+            if found := _semi_join(scope, member):  # refuses anything but key IN (SELECT key)
                 edges.add(found)
-            linked.add(member.this.table)
+            linked.add(member.this.table)  # _semi_join proved this is a column
         for eq in find_all_in_scope(condition, exp.EQ):
             left, right = eq.left, eq.right
             if not (isinstance(left, exp.Column) and isinstance(right, exp.Column)):
