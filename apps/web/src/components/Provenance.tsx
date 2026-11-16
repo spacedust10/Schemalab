@@ -1,4 +1,4 @@
-import type { Provenance as P } from "@/lib/trace";
+import { joinsLine, type Provenance as P } from "@/lib/trace";
 
 export function Provenance({ provenance: p }: { provenance: P }) {
   return (
@@ -7,6 +7,8 @@ export function Provenance({ provenance: p }: { provenance: P }) {
       <dl className="provenance">
         <dt>Tables</dt>
         <dd>{p.tables.join(", ") || "none"}</dd>
+        <dt>Joins</dt>
+        <dd>{joinsLine(p)}</dd>
         <dt>Attempts</dt>
         <dd>{p.attempts}</dd>
         <dt>Models</dt>

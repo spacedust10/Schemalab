@@ -21,7 +21,16 @@ export type Provenance = {
   models: string[];
   results_shared_with_model: boolean;
   categories_shared_with_model: boolean;
+  joins?: string[]; // missing on answers from before the join guard
+  joins_checked?: boolean;
 };
+
+/** The provenance line for an answer's joins. */
+export function joinsLine(p: Pick<Provenance, "joins" | "joins_checked">): string {
+  if (!p.joins_checked) return "Not checked: this data declares no keys";
+  if (!p.joins?.length) return "None";
+  return `${p.joins.join("; ")} (checked against the declared keys)`;
+}
 export type Result = { columns: string[]; rows: Cell[][]; truncated: boolean };
 
 export type Attempt = {

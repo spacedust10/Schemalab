@@ -62,3 +62,15 @@ describe("reduceTrace", () => {
     expect(t.attempts).toEqual([]);
   });
 });
+
+describe("joinsLine", () => {
+  it("says which joins an answer used and whether they were checked", async () => {
+    const { joinsLine } = await import("./trace");
+    expect(joinsLine({ joins: ["customers.id = orders.customer_id"], joins_checked: true })).toBe(
+      "customers.id = orders.customer_id (checked against the declared keys)",
+    );
+    expect(joinsLine({ joins: [], joins_checked: true })).toBe("None");
+    expect(joinsLine({ joins: [], joins_checked: false })).toBe("Not checked: this data declares no keys");
+    expect(joinsLine({})).toBe("Not checked: this data declares no keys"); // answers from before Day 20
+  });
+});
