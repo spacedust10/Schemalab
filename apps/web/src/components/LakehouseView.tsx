@@ -1,8 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { busy, changeLine, LAYERS, type Layer, type Model, numericColumns, type Overview, type Preview, type Run, runLine, snapshotLabel } from "@/lib/lakehouse";
+import { busy, changeLine, LAYERS, type Layer, type Model, numericColumns, type Open, type Overview, type Preview, previewFromQuery, previewQuery, type Run, runLine, snapshotLabel } from "@/lib/lakehouse";
 import { errorText } from "@/lib/post";
 
 const LAYER_NOTE: Record<Layer, string> = {
@@ -16,7 +16,9 @@ export function LakehouseView() {
   const [data, setData] = useState<Overview | null>(null);
   const [models, setModels] = useState<Model[] | null>(null); // the draft, once loaded
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<{ layer: Layer; name: string } | null>(null);
+  // The open table and its snapshot live in the URL, so a view can be shared or reloaded.
+  const open = previewFromQuery(useSearchParams());
+  const show = (next: Open | null) => router.replace(next ? `/lakehouse?${previewQuery(next)}` : "/lakehouse", { scroll: false });
 
   const load = useCallback(
     () =>
@@ -171,7 +173,7 @@ export function LakehouseView() {
                   <ul className="notes">
                     {tables.map((t) => (
                       <li key={t.name}>
-                        <button type="button" className="button quiet" aria-pressed={open?.layer === layer && open.name === t.name} onClick={() => setOpen({ layer, name: t.name })}>
+                        <button type="button" className="button quiet" aria-pressed={open?.layer === layer && open.name === t.name} onClick={() => show({ layer, name: t.name, version: "" })}>
                           {t.name}
                         </button>{" "}
                         {t.rows.toLocaleString()} row{t.rows === 1 ? "" : "s"}
@@ -184,7 +186,15 @@ export function LakehouseView() {
             );
           })}
         </div>
-        {open && <TablePreview key={`${open.layer}.${open.name}`} {...open} snapshots={data.snapshots} runs={data.runs} />}
+        {open && (
+          <TablePreview
+            key={`${open.layer}.${open.name}`}
+            {...open}
+            onVersion={(version) => show({ ...open, version })}
+            snapshots={data.snapshots}
+            runs={data.runs}
+          />
+        )}
       </section>
 
       <section aria-labelledby="lake-models">
@@ -248,8 +258,14 @@ export function LakehouseView() {
   );
 }
 
-function TablePreview({ layer, name, snapshots, runs }: { layer: Layer; name: string; snapshots: Overview["snapshots"]; runs: Run[] }) {
-  const [version, setVersion] = useState<string>("");
+function TablePreview({
+  layer,
+  name,
+  version,
+  onVersion,
+  snapshots,
+  runs,
+}: Open & { onVersion: (version: string) => void; snapshots: Overview["snapshots"]; runs: Run[] }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -278,7 +294,7 @@ function TablePreview({ layer, name, snapshots, runs }: { layer: Layer; name: st
       <h3 ref={heading} tabIndex={-1}>{layer}.{name}</h3>
       <div className="field">
         <label htmlFor="lake-version">As of</label>
-        <select id="lake-version" value={version} onChange={(e) => setVersion(e.target.value)}>
+        <select id="lake-version" value={version} onChange={(e) => onVersion(e.target.value)}>
           <option value="">Now</option>
           {snapshots.map((s) => (
             <option key={s.id} value={s.id}>

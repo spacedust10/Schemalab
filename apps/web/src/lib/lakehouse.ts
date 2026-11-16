@@ -98,3 +98,22 @@ export function numericColumns(rows: unknown[][]): boolean[] {
     return values.length > 0 && values.every((v) => typeof v === "number");
   });
 }
+
+/** The open table and the snapshot it is shown as of, as the page's query string. */
+export type Open = { layer: Layer; name: string; version: string };
+
+export function previewQuery(open: Open | null): string {
+  if (!open) return "";
+  const q: Record<string, string> = { table: `${open.layer}.${open.name}` };
+  if (open.version) q.as_of = open.version;
+  return new URLSearchParams(q).toString();
+}
+
+export function previewFromQuery(search: URLSearchParams): Open | null {
+  const parts = (search.get("table") ?? "").split(".");
+  if (parts.length !== 2) return null;
+  const [layer, name] = parts;
+  if (!(LAYERS as readonly string[]).includes(layer) || !TABLE.test(name)) return null;
+  const asOf = search.get("as_of") ?? "";
+  return { layer: layer as Layer, name, version: /^\d{1,12}$/.test(asOf) ? asOf : "" };
+}

@@ -126,3 +126,22 @@ describe("numeric columns", () => {
     expect(numericColumns([])).toEqual([]);
   });
 });
+
+describe("the preview in the URL", () => {
+  it("reads back what it wrote", async () => {
+    const { previewQuery, previewFromQuery } = await import("./lakehouse");
+    const q = previewQuery({ layer: "gold", name: "revenue", version: "12" });
+    expect(q).toBe("table=gold.revenue&as_of=12");
+    expect(previewFromQuery(new URLSearchParams(q))).toEqual({ layer: "gold", name: "revenue", version: "12" });
+    expect(previewQuery({ layer: "bronze", name: "orders", version: "" })).toBe("table=bronze.orders");
+    expect(previewQuery(null)).toBe("");
+  });
+
+  it("ignores anything it would not have written", async () => {
+    const { previewFromQuery } = await import("./lakehouse");
+    for (const bad of ["table=public.x", "table=gold", "table=gold.Bad", "table=gold.x.y", "", "x=1"]) {
+      expect(previewFromQuery(new URLSearchParams(bad))).toBeNull();
+    }
+    expect(previewFromQuery(new URLSearchParams("table=gold.x&as_of=abc"))).toEqual({ layer: "gold", name: "x", version: "" });
+  });
+});

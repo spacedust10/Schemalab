@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { LakehouseView } from "@/components/LakehouseView";
 import { Masthead } from "@/components/Masthead";
 
@@ -7,7 +8,10 @@ export default function LakehousePage() {
   return (
     <>
       <Masthead signedIn current="lakehouse" />
-      <LakehouseView />
+      {/* The view reads the open table from the URL's query string. */}
+      <Suspense>
+        <LakehouseView />
+      </Suspense>
     </>
   );
 }
