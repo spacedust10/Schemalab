@@ -2,13 +2,14 @@
 
 import threading
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
 from schemalab.guards.engine import open_readonly
+from schemalab.guards.joins import check_joins as joins_allowed
 from schemalab.guards.sql import check_sql
 
 
@@ -22,6 +23,8 @@ class QueryResult:
     columns: list[str]
     rows: list[tuple[Any, ...]]
     truncated: bool
+    joins: list[str] = field(default_factory=list)  # as "a.key = b.key", when checked
+    joins_checked: bool = False  # False: not asked, or the database declares no joins
 
 
 def run_query(
@@ -30,11 +33,19 @@ def run_query(
     allowed_tables: Collection[str] | None = None,
     max_rows: int = 1000,
     timeout_s: float = 10.0,
+    check_joins: bool = False,
 ) -> QueryResult:
+    """`check_joins`: also refuse joins the database does not declare (the analyst's queries)."""
+    from schemalab.joingraph import join_graph, schema_of  # joingraph reads the registry
+
     with open_readonly(db_path) as con:
         if allowed_tables is None:
             allowed_tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
         safe_sql = check_sql(sql, allowed_tables)
+        joins: list[str] = []
+        graph = join_graph(con) if check_joins else set()
+        if graph:  # a database that declares no joins leaves them unchecked, and says so
+            joins = joins_allowed(safe_sql, schema_of(con), graph)
 
         timer = threading.Timer(timeout_s, con.interrupt)
         timer.start()
@@ -47,4 +58,6 @@ def run_query(
             timer.cancel()
 
         columns = [d[0] for d in cursor.description or []]
-        return QueryResult(safe_sql, columns, rows[:max_rows], len(rows) > max_rows)
+        return QueryResult(
+            safe_sql, columns, rows[:max_rows], len(rows) > max_rows, joins, bool(graph)
+        )

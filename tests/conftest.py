@@ -54,3 +54,20 @@ def register(client: TestClient, email: str = "ada@umich.edu") -> dict[str, str]
     resp = client.post("/auth/register", json={"email": email, "password": "correct horse battery"})
     assert resp.status_code == 201, resp.text
     return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+
+@pytest.fixture
+def keyed_db(tmp_path: Path) -> Path:
+    """Orders and customers with a declared foreign key, as a .sql upload stores it."""
+    import json
+
+    path = tmp_path / "keyed.duckdb"
+    keys = {"primary": ["id"], "foreign": [[["customer_id"], "customers", ["id"]]]}
+    with duckdb.connect(str(path)) as con:
+        con.execute("CREATE TABLE customers AS SELECT i AS id, 'c' || i AS name FROM range(3) t(i)")
+        con.execute(
+            "CREATE TABLE orders AS SELECT i AS id, i % 3 AS customer_id, i * 2.0 AS amount "
+            "FROM range(6) t(i)"
+        )
+        con.execute("COMMENT ON TABLE orders IS 'schemalab keys " + json.dumps(keys) + "'")
+    return path

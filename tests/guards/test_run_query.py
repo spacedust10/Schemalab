@@ -53,3 +53,32 @@ def test_interrupts_slow_queries(sample_db: Path) -> None:
     with pytest.raises(QueryTimeoutError):
         run_query(sample_db, slow, timeout_s=0.2)
     assert time.monotonic() - start < 2
+
+
+GOOD_JOIN = (
+    "SELECT c.name, sum(o.amount) AS total FROM orders o JOIN customers c "
+    "ON o.customer_id = c.id GROUP BY 1 ORDER BY 1"
+)
+
+
+def test_joins_are_checked_only_when_asked(keyed_db: Path) -> None:
+    bad = "SELECT * FROM orders o JOIN customers c ON o.id = c.id"
+    assert run_query(keyed_db, bad).joins_checked is False
+    from schemalab.guards.joins import JoinError
+
+    with pytest.raises(JoinError, match=r"customers\.id = orders\.customer_id"):
+        run_query(keyed_db, bad, check_joins=True)
+
+
+def test_a_checked_query_reports_its_joins(keyed_db: Path) -> None:
+    result = run_query(keyed_db, GOOD_JOIN, check_joins=True)
+    assert result.joins == ["customers.id = orders.customer_id"]
+    assert result.joins_checked is True
+    assert result.rows[0] == ("c0", 6.0)
+
+
+def test_a_database_without_keys_says_its_joins_went_unchecked(sample_db: Path) -> None:
+    sql = "SELECT * FROM orders o JOIN customers c ON o.id = c.id LIMIT 1"
+    result = run_query(sample_db, sql, check_joins=True)
+    assert result.joins_checked is False
+    assert result.joins == []
