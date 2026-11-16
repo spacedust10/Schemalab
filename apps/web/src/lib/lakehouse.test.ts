@@ -109,3 +109,12 @@ describe("snapshot lines", () => {
     expect(changeLine({ tables_created: ["bronze_staging._dlt_version", "bronze_staging.quakes"], inlined_insert: ["4"] })).toBe("loader bookkeeping; added rows");
   });
 });
+
+describe("numeric columns", () => {
+  it("are the ones whose values are all numbers, nulls aside", async () => {
+    const { numericColumns } = await import("./lakehouse");
+    expect(numericColumns([[1, "a", null, 2.5], [null, "b", 3, "x"]])).toEqual([true, false, true, false]);
+    expect(numericColumns([[null]])).toEqual([false]);
+    expect(numericColumns([])).toEqual([]);
+  });
+});

@@ -81,3 +81,12 @@ export function changeLine(changes: Record<string, string[]>): string {
   });
   return parts.length ? [...new Set(parts)].join("; ") : "no change";
 }
+
+/** Which columns hold only numbers (nulls aside), so they can be right-aligned. */
+export function numericColumns(rows: unknown[][]): boolean[] {
+  const width = rows[0]?.length ?? 0;
+  return Array.from({ length: width }, (_, j) => {
+    const values = rows.map((r) => r[j]).filter((v) => v !== null);
+    return values.length > 0 && values.every((v) => typeof v === "number");
+  });
+}

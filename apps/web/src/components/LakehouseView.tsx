@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { busy, changeLine, LAYERS, type Layer, type Model, type Overview, type Preview, runLine } from "@/lib/lakehouse";
+import { busy, changeLine, LAYERS, type Layer, type Model, numericColumns, type Overview, type Preview, runLine } from "@/lib/lakehouse";
 import { errorText } from "@/lib/post";
 
 const LAYER_NOTE: Record<Layer, string> = {
@@ -261,6 +261,7 @@ function TablePreview({ layer, name, snapshots }: { layer: Layer; name: string; 
       });
   }, [layer, name, version]);
 
+  const numeric = numericColumns(preview?.rows ?? []);
   return (
     <div className="lake-preview">
       <h3 ref={heading} tabIndex={-1}>{layer}.{name}</h3>
@@ -285,11 +286,11 @@ function TablePreview({ layer, name, snapshots }: { layer: Layer; name: string; 
                 : `${preview.total.toLocaleString()} row${preview.total === 1 ? "" : "s"}.`}
             </caption>
             <thead>
-              <tr>{preview.columns.map((c) => <th key={c} scope="col">{c}</th>)}</tr>
+              <tr>{preview.columns.map((c, j) => <th key={c} scope="col" className={numeric[j] ? "num" : undefined}>{c}</th>)}</tr>
             </thead>
             <tbody>
               {preview.rows.map((row, i) => (
-                <tr key={i}>{row.map((v, j) => <td key={j}>{v === null ? "" : String(v)}</td>)}</tr>
+                <tr key={i}>{row.map((v, j) => <td key={j} className={numeric[j] ? "num" : undefined}>{v === null ? "" : String(v)}</td>)}</tr>
               ))}
             </tbody>
           </table>
