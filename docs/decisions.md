@@ -26,4 +26,5 @@ Technical choices and why they were made. When a decision changes, add a new row
 | 2026-11-15 | The API never holds lake credentials | Ingest publishes silver and gold to a DuckDB file that Ask opens with the locked engine; only ingest has the S3 key and the catalog password |
 | 2026-11-15 | Lake models are checked twice: the sqlglot guard in the API, then DuckDB's own parse in ingest | DuckLake's catalog is reachable through `postgres_query` even after lockdown; both checks refuse table functions and other catalogs |
 | 2026-11-15 | Lake secrets have no defaults in Compose | `scripts/lake-env.sh` writes random ones to `.env`; a committed default would be a working key |
+| 2026-11-15 | Ingest reaches the internet only through a Squid proxy that allows HTTPS CONNECT to the USGS and Google Sheets hosts | The code's fixed hosts are one wall; the network is a second, against a bug or a compromised dependency. Ingest sits on internal networks only, and dlt's telemetry is off |
 | _open_ | MetricFlow or Cube for the semantic layer | Decide when the data platform is built |
