@@ -111,3 +111,34 @@ def test_a_table_with_no_joins_says_so() -> None:
 def test_a_self_join_on_the_same_column_passes() -> None:
     sql = "SELECT * FROM mi_insurance a JOIN mi_insurance b ON a.id = b.id AND a.year = b.year"
     assert check(sql) == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # A semi-join is a join: insurance ids matched to zone ids.
+        "SELECT * FROM mi_insurance WHERE id IN (SELECT LocationID FROM taxi_zones)",
+        # A correlated subquery that links the tables without a key equality.
+        "SELECT * FROM mi_insurance i WHERE EXISTS "
+        "(SELECT 1 FROM taxi_zones z WHERE z.LocationID > i.id)",
+        # A UNION CTE: the first branch alone would look like the zone key.
+        "WITH k AS (SELECT LocationID AS lid FROM taxi_zones "
+        "UNION ALL SELECT id FROM mi_insurance) "
+        "SELECT * FROM taxi_trips t JOIN k ON t.PULocationID = k.lid",
+        # Columns qualify cannot resolve, across several tables.
+        "SELECT * FROM taxi_trips t JOIN taxi_zones z ON t.PULocationID = z.nope",
+    ],
+)
+def test_joins_hidden_in_subqueries_and_unions_are_refused(sql: str) -> None:
+    with pytest.raises(JoinError):
+        check(sql)
+
+
+def test_an_allowed_semi_join_passes() -> None:
+    sql = "SELECT * FROM taxi_trips WHERE PULocationID IN (SELECT LocationID FROM taxi_zones)"
+    assert check(sql) == ["taxi_trips.pulocationid = taxi_zones.locationid"]
+
+
+def test_an_unknown_column_in_a_one_table_query_is_left_to_duckdb() -> None:
+    # DuckDB's error names the near match; the join guard has nothing to say.
+    assert check("SELECT nope FROM taxi_trips") == []

@@ -48,18 +48,18 @@ def check_joins(
 
     `schema` maps each table to its columns and types, so unqualified columns resolve.
     """
+    lower: dict[str, object] = {
+        t.lower(): {c.lower(): ty for c, ty in cols.items()} for t, cols in schema.items()
+    }
     try:
-        tree = qualify(
-            sqlglot.parse_one(sql, dialect="duckdb"),
-            schema={
-                t.lower(): {c.lower(): ty for c, ty in cols.items()} for t, cols in schema.items()
-            },
-            dialect="duckdb",
-            validate_qualify_columns=True,
-        )
-    except OptimizeError:
-        # An unknown or ambiguous column: DuckDB refuses the query anyway, with a better message.
-        return []
+        parsed = sqlglot.parse_one(sql, dialect="duckdb")
+        tree = qualify(parsed.copy(), schema=lower, dialect="duckdb", validate_qualify_columns=True)
+    except OptimizeError as e:
+        # With one table there is no join to check, and DuckDB names the unknown column better.
+        # With several, a column the guard cannot place could hide a join: refuse.
+        if len(list(parsed.find_all(exp.Table))) <= 1:
+            return []
+        raise JoinError(f"name each column with its table, like t.column ({e})") from None
     except SqlglotError as e:
         raise JoinError(f"could not read the joins: {e}") from None
 
@@ -86,6 +86,10 @@ def _scope_edges(scope: Scope) -> set[Edge]:
     edges: set[Edge] = set()
     linked: set[str] = set()
     for condition in conditions:
+        for member in find_all_in_scope(condition, exp.In):
+            if found := _semi_join(scope, member):
+                edges.add(found)
+            linked.add(member.this.table)
         for eq in find_all_in_scope(condition, exp.EQ):
             left, right = eq.left, eq.right
             if not (isinstance(left, exp.Column) and isinstance(right, exp.Column)):
@@ -104,6 +108,14 @@ def _scope_edges(scope: Scope) -> set[Edge]:
             if a != b:
                 edges.add(edge(*a, *b))
 
+    # A subquery that reads the outer query's columns is a join too: it needs a key equality.
+    outer = {c.table for c in scope.external_columns} - linked
+    if outer:
+        raise JoinError(
+            f"a subquery refers to {', '.join(sorted(outer))} without a key equality. "
+            "Link it with WHERE inner.key = outer.key."
+        )
+
     if joins:
         sources = [select.args["from_"].this, *(j.this for j in joins)]
         unlinked = [s.alias_or_name for s in sources if s.alias_or_name not in linked]
@@ -116,6 +128,24 @@ def _scope_edges(scope: Scope) -> set[Edge]:
     return edges
 
 
+def _semi_join(scope: Scope, member: exp.In) -> Edge | None:
+    """`col IN (SELECT key FROM t)` joins col's table to t: the same rule as an ON."""
+    query = member.args.get("query")
+    if query is None:
+        return None  # IN (1, 2, 3): a filter
+    if member.find_ancestor(exp.Or, exp.Not):
+        raise JoinError(f"an IN (SELECT ...) under OR or NOT proves nothing: {member.sql()}")
+    inner = next((s for s in scope.subquery_scopes if s.expression is query.unnest()), None)
+    left = member.this
+    selects = inner.expression.selects if inner and isinstance(inner.expression, exp.Select) else []
+    target = selects[0].unalias() if len(selects) == 1 else None
+    a = _base(scope, left) if isinstance(left, exp.Column) else None
+    b = _base(inner, target) if inner and isinstance(target, exp.Column) else None
+    if a is None or b is None:
+        raise JoinError(f"{member.sql()} matches a computed value, not a key column.")
+    return edge(*a, *b) if a != b else None
+
+
 def _base(scope: Scope | None, column: exp.Column) -> Column | None:
     """The base table and column behind a qualified column, through CTEs, derived tables and
     outer queries; None for a computed value."""
@@ -126,6 +156,8 @@ def _base(scope: Scope | None, column: exp.Column) -> Column | None:
     source = scope.sources.get(column.table)
     if isinstance(source, exp.Table):
         return (source.name.lower(), column.name.lower())
+    if isinstance(source, Scope) and isinstance(source.expression, exp.SetOperation):
+        return None  # a UNION's column could come from either branch: not a key
     if isinstance(source, Scope) and isinstance(source.expression, exp.Query):
         # A CTE or derived table: follow a plain column projection through.
         for projection in source.expression.selects:
