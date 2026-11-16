@@ -74,7 +74,7 @@ describe("lakehouse routes", () => {
 
 const run = (over: Partial<Run>): Run => ({
   id: 1, kind: "file", label: "orders.csv", status: "done", result: null, error: null,
-  created_at: "2026-11-14T00:00:00Z", finished_at: null, ...over,
+  created_at: "2026-11-14T00:00:00Z", finished_at: null, snapshot: null, ...over,
 });
 
 describe("run lines", () => {
@@ -84,6 +84,14 @@ describe("run lines", () => {
     expect(runLine(run({ status: "failed", error: "The file could not be read." }))).toBe("The file could not be read.");
     expect(runLine(run({ status: "running" }))).toBe("Running…");
     expect(runLine(run({ kind: "transform", result: { "silver.paid": 2, "gold.revenue": 1 } }))).toBe("silver.paid: 2 rows, gold.revenue: 1 row");
+    expect(runLine(run({ result: { orders: 3 }, snapshot: 12 }))).toBe("orders: 3 rows, as snapshot #12");
+  });
+
+  it("name the run behind each snapshot", async () => {
+    const { snapshotLabel } = await import("./lakehouse");
+    const runs = [run({ label: "orders.csv", snapshot: 12 }), run({ label: "2 models", status: "failed", snapshot: null })];
+    expect(snapshotLabel(12, runs)).toBe("Snapshot #12, after orders.csv");
+    expect(snapshotLabel(11, runs)).toBe("Snapshot #11");
   });
 
   it("know when to keep checking", () => {

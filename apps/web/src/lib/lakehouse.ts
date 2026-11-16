@@ -12,6 +12,7 @@ export type Run = {
   error: string | null;
   created_at: string;
   finished_at: string | null;
+  snapshot: number | null; // the lake version the run left behind
 };
 export type Snapshot = { id: number; at: string; changes: Record<string, string[]> };
 export type Model = { layer: "silver" | "gold"; name: string; sql: string };
@@ -51,7 +52,14 @@ export function runLine(run: Run): string {
   if (run.status === "failed") return run.error ?? "The run failed.";
   const counts = Object.entries(run.result ?? {});
   if (counts.length === 0) return "Nothing new to load.";
-  return counts.map(([table, n]) => `${table}: ${rows(n)}`).join(", ");
+  const made = counts.map(([table, n]) => `${table}: ${rows(n)}`).join(", ");
+  return run.snapshot === null ? made : `${made}, as snapshot #${run.snapshot}`;
+}
+
+/** A snapshot named after the run that made it, when there is one. */
+export function snapshotLabel(id: number, runs: Run[]): string {
+  const run = runs.find((r) => r.snapshot === id);
+  return run ? `Snapshot #${id}, after ${run.label}` : `Snapshot #${id}`;
 }
 
 export const busy = (runs: Run[]) => runs.some((r) => r.status === "running");

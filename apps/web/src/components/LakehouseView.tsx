@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { busy, changeLine, LAYERS, type Layer, type Model, numericColumns, type Overview, type Preview, runLine } from "@/lib/lakehouse";
+import { busy, changeLine, LAYERS, type Layer, type Model, numericColumns, type Overview, type Preview, type Run, runLine, snapshotLabel } from "@/lib/lakehouse";
 import { errorText } from "@/lib/post";
 
 const LAYER_NOTE: Record<Layer, string> = {
@@ -184,7 +184,7 @@ export function LakehouseView() {
             );
           })}
         </div>
-        {open && <TablePreview key={`${open.layer}.${open.name}`} {...open} snapshots={data.snapshots} />}
+        {open && <TablePreview key={`${open.layer}.${open.name}`} {...open} snapshots={data.snapshots} runs={data.runs} />}
       </section>
 
       <section aria-labelledby="lake-models">
@@ -248,7 +248,7 @@ export function LakehouseView() {
   );
 }
 
-function TablePreview({ layer, name, snapshots }: { layer: Layer; name: string; snapshots: Overview["snapshots"] }) {
+function TablePreview({ layer, name, snapshots, runs }: { layer: Layer; name: string; snapshots: Overview["snapshots"]; runs: Run[] }) {
   const [version, setVersion] = useState<string>("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -282,7 +282,7 @@ function TablePreview({ layer, name, snapshots }: { layer: Layer; name: string; 
           <option value="">Now</option>
           {snapshots.map((s) => (
             <option key={s.id} value={s.id}>
-              Snapshot #{s.id}, {new Date(s.at).toLocaleString()}
+              {snapshotLabel(s.id, runs)} ({new Date(s.at).toLocaleString()})
             </option>
           ))}
         </select>
