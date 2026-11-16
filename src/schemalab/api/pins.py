@@ -3,7 +3,7 @@ re-runs every query through the SQL guard and the locked engine, so the dashboar
 """
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import duckdb
 from fastapi import APIRouter, HTTPException, status
@@ -12,8 +12,8 @@ from pydantic import BaseModel, StringConstraints
 from schemalab import store
 from schemalab.agent.graph import json_value
 from schemalab.api.auth import EngineDep, UserDep
-from schemalab.api.datasets import SampleDb, UploadsDir, user_db
-from schemalab.api.lakehouse import LakeDir, published
+from schemalab.api.datasets import Dataset, SampleDb, UploadsDir, dataset_db
+from schemalab.api.lakehouse import LakeDir
 from schemalab.guards.run import QueryTimeoutError, run_query
 from schemalab.guards.sql import UnsafeSQLError
 
@@ -28,13 +28,7 @@ class PinRequest(BaseModel):
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
     ]
     sql: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000)]
-    dataset: Literal["sample", "mine", "lake"] = "sample"
-
-
-def _db(dataset: str, user: dict[str, Any], sample: Path, uploads: Path, lake: Path) -> Path:
-    if dataset == "sample":
-        return sample
-    return published(lake, user) if dataset == "lake" else user_db(uploads, user)
+    dataset: Dataset = "sample"
 
 
 def _run(sql: str, db: Path) -> dict[str, Any]:
@@ -59,7 +53,7 @@ def add(
     uploads: UploadsDir,
     lake: LakeDir,
 ) -> dict[str, Any]:
-    outcome = _run(body.sql, _db(body.dataset, user, sample, uploads, lake))
+    outcome = _run(body.sql, dataset_db(body.dataset, user, sample, uploads, lake))
     if outcome["error"]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"This query cannot be pinned: {outcome['error']}"
@@ -79,7 +73,9 @@ def list_all(
 ) -> list[dict[str, Any]]:
     with engine.connect() as conn:
         pins = store.list_pins(conn, user["id"])
-    return [{**p, **_run(p["sql"], _db(p["dataset"], user, sample, uploads, lake))} for p in pins]
+    return [
+        {**p, **_run(p["sql"], dataset_db(p["dataset"], user, sample, uploads, lake))} for p in pins
+    ]
 
 
 @router.delete("/{pin_id}", status_code=status.HTTP_204_NO_CONTENT)

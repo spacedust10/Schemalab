@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,12 +20,12 @@ from schemalab.api.auth import UserDep, get_engine
 from schemalab.api.auth import router as auth_router
 from schemalab.api.bench import router as bench_router
 from schemalab.api.corrections import router as corrections_router
-from schemalab.api.datasets import UploadsDir, get_db_path, user_db
+from schemalab.api.datasets import EMPTY, Dataset, UploadsDir, dataset_db, get_db_path
 from schemalab.api.datasets import router as datasets_router
 from schemalab.api.er import router as er_router
 from schemalab.api.gateway import get_gateway
 from schemalab.api.lab import router as lab_router
-from schemalab.api.lakehouse import LakeDir, published
+from schemalab.api.lakehouse import LakeDir
 from schemalab.api.lakehouse import router as lakehouse_router
 from schemalab.api.normalize import router as normalize_router
 from schemalab.api.pins import router as pins_router
@@ -42,7 +42,7 @@ class AskRequest(BaseModel):
     ]
     # "sample": the built-in datasets. "mine": the caller's uploaded tables. "lake": the silver
     # and gold tables of the caller's lakehouse.
-    dataset: Literal["sample", "mine", "lake"] = "sample"
+    dataset: Dataset = "sample"
     # For "mine": let the model see the distinct values of short text columns.
     share_categories: bool = False
 
@@ -97,17 +97,9 @@ def create_app() -> FastAPI:
         settings: Annotated[Settings, Depends(get_settings)],
         engine: Annotated[Engine, Depends(get_engine)],
     ) -> StreamingResponse:
-        if body.dataset == "mine":
-            db_path = user_db(uploads_dir, user)
-            if not db_path.exists():
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a file first.")
-        elif body.dataset == "lake":
-            db_path = published(lake_dir, user)
-            if not db_path.exists():
-                raise HTTPException(
-                    status.HTTP_400_BAD_REQUEST,
-                    "Build a silver or gold table in the lakehouse first.",
-                )
+        db_path = dataset_db(body.dataset, user, db_path, uploads_dir, lake_dir)
+        if body.dataset != "sample" and not db_path.exists():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, EMPTY[body.dataset])
         with engine.connect() as conn:
             notes = [c["text"] for c in store.list_corrections(conn, user["id"])]
 

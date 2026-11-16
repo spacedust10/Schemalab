@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
@@ -32,6 +32,25 @@ SampleDb = Annotated[Path, Depends(get_db_path)]
 def user_db(root: Path, user: dict[str, Any]) -> Path:
     # The id is an integer from the session lookup, never user input.
     return root / f"{int(user['id'])}.duckdb"
+
+
+Dataset = Literal["sample", "mine", "lake"]
+# What to do when a user's dataset has no tables yet.
+EMPTY = {
+    "mine": "Upload a file first.",
+    "lake": "Build a silver or gold table in the lakehouse first.",
+}
+
+
+def dataset_db(
+    dataset: Dataset, user: dict[str, Any], sample: Path, uploads: Path, lake: Path
+) -> Path:
+    """The DuckDB file behind each dataset Ask and pins can read."""
+    from schemalab.api.lakehouse import published  # lakehouse's router imports this module
+
+    if dataset == "sample":
+        return sample
+    return published(lake, user) if dataset == "lake" else user_db(uploads, user)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
