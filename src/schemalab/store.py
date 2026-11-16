@@ -153,7 +153,7 @@ lake_runs = Table(
     Column("kind", String(20), nullable=False),  # file, sheet, quakes, transform
     Column("label", String(255), nullable=False),
     Column("status", String(20), nullable=False),  # running, done, failed
-    Column("result", JSON),  # rows loaded per table
+    Column("result", JSON),  # {"tables": rows per table, "snapshot": the lake version it made}
     Column("error", Text),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("finished_at", DateTime(timezone=True)),
@@ -386,7 +386,7 @@ def add_lake_run(conn: Connection, user_id: int, kind: str, label: str) -> int:
 
 
 def finish_lake_run(
-    conn: Connection, run_id: int, result: dict[str, int] | None, error: str | None
+    conn: Connection, run_id: int, result: dict[str, Any] | None, error: str | None
 ) -> None:
     conn.execute(
         update(lake_runs)
@@ -410,13 +410,21 @@ def list_lake_runs(conn: Connection, user_id: int, limit: int = 20) -> list[dict
             "kind": r.kind,
             "label": r.label,
             "status": r.status,
-            "result": r.result,
+            **_run_result(r.result),
             "error": r.error,
             "created_at": _aware(r.created_at).isoformat(),
             "finished_at": _aware(r.finished_at).isoformat() if r.finished_at else None,
         }
         for r in rows
     ]
+
+
+def _run_result(stored: Any) -> dict[str, Any]:
+    """Rows per table and the snapshot made. Rows from before snapshots were kept hold only the
+    rows per table."""
+    if isinstance(stored, dict) and "tables" in stored:
+        return {"result": stored["tables"], "snapshot": stored.get("snapshot")}
+    return {"result": stored, "snapshot": None}
 
 
 def get_lake_models(conn: Connection, user_id: int) -> list[dict[str, str]]:

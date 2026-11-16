@@ -93,7 +93,7 @@ def _release(user_id: int) -> None:
 
 
 def _start(
-    engine: Engine, user_id: int, kind: str, label: str, job: Callable[[], dict[str, int]]
+    engine: Engine, user_id: int, kind: str, label: str, job: Callable[[], dict[str, Any]]
 ) -> dict[str, Any]:
     """Records the run and starts it; the caller has already reserved a slot."""
     try:
@@ -236,15 +236,16 @@ async def load_file(
 
     lake = lake_of(user)
 
-    def job() -> dict[str, int]:
-        counts: dict[str, int] = {}
+    def job() -> dict[str, Any]:
+        made: dict[str, Any] = {"tables": {}, "snapshot": None}
         try:
-            for file, target in handed:
-                counts |= ingest.load_file(lake, file, target)
+            for file, target in handed:  # one load per sheet; the run ends at the last snapshot
+                one = ingest.load_file(lake, file, target)
+                made = {"tables": made["tables"] | one["tables"], "snapshot": one["snapshot"]}
         finally:
             for file, _ in handed:  # ingest deletes what it loaded; this covers a failure
                 (inbox / file).unlink(missing_ok=True)
-        return counts
+        return made
 
     try:
         return _start(engine, user["id"], "file", name, job)

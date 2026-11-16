@@ -28,23 +28,23 @@ class FakeIngest:
         self.fail: Exception | None = None
         self.bronze: list[dict[str, Any]] = list(BRONZE)
 
-    def _do(self, *call: Any) -> dict[str, int]:
+    def _do(self, *call: Any) -> dict[str, Any]:
         self.calls.append(call)
         if self.fail:
             raise self.fail
-        return {"orders": 3}
+        return {"tables": {"orders": 3}, "snapshot": 6 + len(self.calls)}
 
-    def load_file(self, lake: str, file: str, table: str) -> dict[str, int]:
+    def load_file(self, lake: str, file: str, table: str) -> dict[str, Any]:
         self.seen[file] = (self.inbox / file).read_bytes()
         return self._do("file", lake, file, table)
 
-    def load_sheet(self, lake: str, url: str, table: str) -> dict[str, int]:
+    def load_sheet(self, lake: str, url: str, table: str) -> dict[str, Any]:
         return self._do("sheet", lake, url, table)
 
-    def load_quakes(self, lake: str) -> dict[str, int]:
+    def load_quakes(self, lake: str) -> dict[str, Any]:
         return self._do("quakes", lake)
 
-    def transform(self, lake: str, models: list[dict[str, str]]) -> dict[str, int]:
+    def transform(self, lake: str, models: list[dict[str, str]]) -> dict[str, Any]:
         return self._do("transform", lake, models)
 
     def tables(self, lake: str) -> list[dict[str, Any]]:
@@ -115,6 +115,7 @@ def test_a_csv_is_handed_over_and_the_run_recorded(
     [run] = runs(client, headers)
     assert (run["kind"], run["label"], run["status"]) == ("file", "Orders.csv", "done")
     assert run["result"] == {"orders": 3}
+    assert run["snapshot"] == 7  # the snapshot this run left the lake at
 
 
 def test_a_table_name_can_be_chosen(client: TestClient, ingest: FakeIngest) -> None:
@@ -133,8 +134,11 @@ def test_each_excel_sheet_is_its_own_load(
     wb.create_sheet("West").append(["b"])
     path = tmp_path / "book.xlsx"
     wb.save(path)
-    assert send(client, register(client), path.read_bytes(), "Book.xlsx").status_code == 202
+    headers = register(client)
+    assert send(client, headers, path.read_bytes(), "Book.xlsx").status_code == 202
     assert [c[3] for c in ingest.calls] == ["book_sheet", "book_west"]
+    [run] = client.get("/lakehouse", headers=headers).json()["runs"]
+    assert run["snapshot"] == 8  # the last sheet's
 
 
 def test_parquet_is_handed_over_as_parquet(client: TestClient, ingest: FakeIngest) -> None:
@@ -385,3 +389,14 @@ def test_handed_files_are_removed_if_the_run_cannot_be_recorded(
     monkeypatch.undo()
     monkeypatch.setattr(api, "_spawn", lambda job: job())
     assert send(client, headers, b"id\n1\n", "a.csv").status_code == 202  # the slot came back
+
+
+def test_runs_saved_before_snapshots_were_kept_still_read(client: TestClient, engine: Any) -> None:
+    from schemalab import store
+
+    register(client)
+    with engine.begin() as conn:
+        run_id = store.add_lake_run(conn, 1, "file", "old.csv")
+        store.finish_lake_run(conn, run_id, {"orders": 3}, None)
+        [run] = store.list_lake_runs(conn, 1)
+    assert (run["result"], run["snapshot"]) == ({"orders": 3}, None)

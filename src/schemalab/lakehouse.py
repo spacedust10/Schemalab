@@ -54,7 +54,10 @@ def check_models(
 
 
 class Ingest:
-    """The ingest service's HTTP API, called with the token only the API holds."""
+    """The ingest service's HTTP API, called with the token only the API holds.
+
+    A load or transform answers {"tables": rows per table, "snapshot": the lake's version after}.
+    """
 
     def __init__(self, base_url: str, token: str) -> None:
         self._http = httpx.Client(
@@ -74,20 +77,20 @@ class Ingest:
             raise Unavailable(f"ingest answered {resp.status_code}")
         return resp.json()
 
-    def load_file(self, lake: str, file: str, table: str) -> dict[str, int]:
+    def load_file(self, lake: str, file: str, table: str) -> dict[str, Any]:
         body = {"file": file, "table": table}
-        return dict(self._call("POST", f"/lakes/{lake}/load/file", json=body)["tables"])
+        return dict(self._call("POST", f"/lakes/{lake}/load/file", json=body))
 
-    def load_sheet(self, lake: str, url: str, table: str) -> dict[str, int]:
+    def load_sheet(self, lake: str, url: str, table: str) -> dict[str, Any]:
         body = {"url": url, "table": table}
-        return dict(self._call("POST", f"/lakes/{lake}/load/sheet", json=body)["tables"])
+        return dict(self._call("POST", f"/lakes/{lake}/load/sheet", json=body))
 
-    def load_quakes(self, lake: str) -> dict[str, int]:
-        return dict(self._call("POST", f"/lakes/{lake}/load/quakes")["tables"])
+    def load_quakes(self, lake: str) -> dict[str, Any]:
+        return dict(self._call("POST", f"/lakes/{lake}/load/quakes"))
 
-    def transform(self, lake: str, models: list[dict[str, str]]) -> dict[str, int]:
+    def transform(self, lake: str, models: list[dict[str, str]]) -> dict[str, Any]:
         body = {"models": models}
-        return dict(self._call("POST", f"/lakes/{lake}/transform", json=body)["tables"])
+        return dict(self._call("POST", f"/lakes/{lake}/transform", json=body))
 
     def tables(self, lake: str) -> list[dict[str, Any]]:
         return list(self._call("GET", f"/lakes/{lake}/tables"))
