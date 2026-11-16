@@ -21,4 +21,9 @@ Technical choices and why they were made. When a decision changes, add a new row
 | 2026-11-08 | Run the guard's normalized SQL, never the raw model text | What was checked is exactly what runs |
 | 2026-11-08 | Sample data is downloaded and checksummed, never committed | Keeps the repo small and respects each dataset's license |
 | 2026-11-08 | Test-first development for every change, config included | The first review found problems no check had caught |
+| 2026-11-15 | Garage, not MinIO, for the lake's object storage | MinIO's community edition is archived and ships no images; Garage has a single-node mode, versioned images and per-bucket keys |
+| 2026-11-15 | dlt runs in its own `ingest` service on DuckDB 1.5; the API stays on 2.0 | dlt pins `duckdb<2`. The DuckLake catalog stays at format 1.0, which both read |
+| 2026-11-15 | The API never holds lake credentials | Ingest publishes silver and gold to a DuckDB file that Ask opens with the locked engine; only ingest has the S3 key and the catalog password |
+| 2026-11-15 | Lake models are checked twice: the sqlglot guard in the API, then DuckDB's own parse in ingest | DuckLake's catalog is reachable through `postgres_query` even after lockdown; both checks refuse table functions and other catalogs |
+| 2026-11-15 | Lake secrets have no defaults in Compose | `scripts/lake-env.sh` writes random ones to `.env`; a committed default would be a working key |
 | _open_ | MetricFlow or Cube for the semantic layer | Decide when the data platform is built |

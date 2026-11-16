@@ -40,6 +40,7 @@ Requirements: Docker, and [Ollama](https://ollama.com) for local models.
 git clone https://github.com/spacedust10/Schemalab
 cd Schemalab
 cp .env.example .env
+./scripts/lake-env.sh   # random secrets for the lakehouse, added to .env once
 docker compose up
 ```
 
@@ -112,6 +113,9 @@ src/schemalab/
   api/                 FastAPI app
   guards/              SQL guard, locked engine, guarded execution
   datasets.py          sample dataset loader
+  lakehouse.py         lakehouse model checks and the client for ingest
+ingest/                lakehouse loader: dlt into DuckLake on Garage (its own DuckDB 1.5)
+scripts/               smoke test, demo, lake-env.sh
 tests/
 docs/
   design_principles.md rules every chart and view follows

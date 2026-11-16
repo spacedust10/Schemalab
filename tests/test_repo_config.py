@@ -166,3 +166,10 @@ def test_the_lake_is_reachable_only_through_ingest() -> None:
     assert "ingest" in services["api"]["networks"]
     assert "lake" not in services["api"]["networks"]
     assert services["api"]["environment"]["SCHEMALAB_INGEST_URL"] == "http://ingest:8100"
+
+
+def test_the_quick_start_makes_the_lake_secrets_compose_requires() -> None:
+    readme = (ROOT / "README.md").read_text()
+    start = readme[readme.index("## Quick start") :]
+    assert start.index("lake-env.sh") < start.index("docker compose up")
+    assert (ROOT / "scripts" / "lake-env.sh").stat().st_mode & 0o111
