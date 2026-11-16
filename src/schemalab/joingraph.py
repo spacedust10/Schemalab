@@ -13,7 +13,7 @@ from typing import Any
 import duckdb
 
 from schemalab.datasets import REGISTRY
-from schemalab.guards.joins import Edge, edge, text
+from schemalab.guards.joins import Edge, edge
 from schemalab.uploads import KEYS_COMMENT
 
 
@@ -29,25 +29,35 @@ def schema_of(con: duckdb.DuckDBPyConnection) -> dict[str, dict[str, str]]:
     return out
 
 
-def join_graph(con: duckdb.DuckDBPyConnection) -> set[Edge]:
-    columns = {t: set(cols) for t, cols in schema_of(con).items()}
+def join_graph(con: duckdb.DuckDBPyConnection) -> dict[Edge, str]:
+    """Each allowed join, mapped to how the prompt shows it: the schema's own spelling, and
+    what the join means when the registry says. Registry joins come first, in their order."""
+    spelled: dict[tuple[str, str], tuple[str, str]] = {}
+    for table, column in con.execute(
+        "SELECT table_name, column_name FROM duckdb_columns() "
+        "WHERE schema_name = 'main' AND database_name = current_database()"
+    ).fetchall():
+        spelled[(table.lower(), column.lower())] = (table, column)
 
-    def exists(table: str, column: str) -> bool:
-        return column.lower() in columns.get(table.lower(), set())
+    def line(ta: str, ca: str, tb: str, cb: str, note: str = "") -> str | None:
+        a, b = spelled.get((ta.lower(), ca.lower())), spelled.get((tb.lower(), cb.lower()))
+        if a is None or b is None:
+            return None
+        return f"{a[0]}.{a[1]} = {b[0]}.{b[1]}" + (f" -- {note}" if note else "")
 
-    graph: set[Edge] = set()
+    graph: dict[Edge, str] = {}
     for ds in REGISTRY.values():
-        for ta, ca, tb, cb in ds.joins:
-            if exists(ta, ca) and exists(tb, cb):
-                graph.add(edge(ta, ca, tb, cb))
+        for ta, ca, tb, cb, note in ds.joins:
+            if shown := line(ta, ca, tb, cb, note):
+                graph.setdefault(edge(ta, ca, tb, cb), shown)
     for table, comment in con.execute(
         "SELECT table_name, comment FROM duckdb_tables() "
         "WHERE schema_name = 'main' AND database_name = current_database()"
     ).fetchall():
         for own, parent, theirs in _foreign(comment):
             for ca, cb in zip(own, theirs, strict=False):
-                if exists(table, ca) and exists(parent, cb):
-                    graph.add(edge(table, ca, parent, cb))
+                if shown := line(table, ca, parent, cb):
+                    graph.setdefault(edge(table, ca, parent, cb), shown)
     return graph
 
 
@@ -61,13 +71,15 @@ def _foreign(comment: str | None) -> list[tuple[list[str], str, list[str]]]:
         return []  # a hand-edited or older comment: no joins from it
 
 
-def describe_joins(graph: set[Edge]) -> str:
+def describe_joins(graph: dict[Edge, str]) -> str:
     """The prompt's list of allowed joins; empty when the database declares none."""
     if not graph:
         return ""
-    return "Joins you may use (no others will run):\n" + "\n".join(
-        f"  {text(e)}" for e in sorted(graph)
+    head = (
+        "How tables join. Join only when the question needs columns from both; "
+        "no other join will run:"
     )
+    return "\n".join([head, *(f"  {shown}" for shown in graph.values())])
 
 
 def joins_block(db_path: Path) -> str:

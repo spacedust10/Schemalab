@@ -9,6 +9,7 @@ from typing import Any
 import duckdb
 
 from schemalab.guards.engine import open_readonly
+from schemalab.guards.joins import UnplacedColumnError
 from schemalab.guards.joins import check_joins as joins_allowed
 from schemalab.guards.sql import check_sql
 
@@ -45,7 +46,11 @@ def run_query(
         joins: list[str] = []
         graph = join_graph(con) if check_joins else set()
         if graph:  # a database that declares no joins leaves them unchecked, and says so
-            joins = joins_allowed(safe_sql, schema_of(con), graph)
+            try:
+                joins = joins_allowed(safe_sql, schema_of(con), graph)
+            except UnplacedColumnError:
+                con.execute(f"EXPLAIN {safe_sql}")  # a made-up column: DuckDB says which
+                raise
 
         timer = threading.Timer(timeout_s, con.interrupt)
         timer.start()

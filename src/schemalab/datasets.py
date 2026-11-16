@@ -61,8 +61,9 @@ class Dataset:
     license: str = ""
     homepage: str = ""
     tags: list[str] = field(default_factory=list)
-    # Joins the analyst may use: (table, column, table, column), within this dataset only.
-    joins: list[tuple[str, str, str, str]] = field(default_factory=list)
+    # Joins the analyst may use, within this dataset only: (table, column, table, column, what
+    # the join means). The meaning tells the model which of two similar keys a question needs.
+    joins: list[tuple[str, str, str, str, str]] = field(default_factory=list)
 
 
 def build_database(db_path: Path, datasets: list[Dataset], cache_dir: Path) -> None:
@@ -144,8 +145,8 @@ REGISTRY: dict[str, Dataset] = {
                 ),
             ],
             joins=[
-                ("taxi_trips", "PULocationID", "taxi_zones", "LocationID"),
-                ("taxi_trips", "DOLocationID", "taxi_zones", "LocationID"),
+                ("taxi_trips", "PULocationID", "taxi_zones", "LocationID", "the pickup zone"),
+                ("taxi_trips", "DOLocationID", "taxi_zones", "LocationID", "the dropoff zone"),
             ],
         ),
         Dataset(
@@ -179,17 +180,48 @@ REGISTRY: dict[str, Dataset] = {
             # ponytail: no geolocation joins. Its zip prefixes repeat, so a join on them
             # multiplies rows; add one through a de-duplicated view if questions need places.
             joins=[
-                ("olist_orders", "customer_id", "olist_customers", "customer_id"),
-                ("olist_order_items", "order_id", "olist_orders", "order_id"),
-                ("olist_order_items", "product_id", "olist_products", "product_id"),
-                ("olist_order_items", "seller_id", "olist_sellers", "seller_id"),
-                ("olist_order_payments", "order_id", "olist_orders", "order_id"),
-                ("olist_order_reviews", "order_id", "olist_orders", "order_id"),
+                (
+                    "olist_orders",
+                    "customer_id",
+                    "olist_customers",
+                    "customer_id",
+                    "the order's customer",
+                ),
+                ("olist_order_items", "order_id", "olist_orders", "order_id", "the item's order"),
+                (
+                    "olist_order_items",
+                    "product_id",
+                    "olist_products",
+                    "product_id",
+                    "the item's product",
+                ),
+                (
+                    "olist_order_items",
+                    "seller_id",
+                    "olist_sellers",
+                    "seller_id",
+                    "the item's seller",
+                ),
+                (
+                    "olist_order_payments",
+                    "order_id",
+                    "olist_orders",
+                    "order_id",
+                    "the payment's order",
+                ),
+                (
+                    "olist_order_reviews",
+                    "order_id",
+                    "olist_orders",
+                    "order_id",
+                    "the review's order",
+                ),
                 (
                     "olist_products",
                     "product_category_name",
                     "olist_category_translation",
                     "product_category_name",
+                    "the category's English name",
                 ),
             ],
         ),

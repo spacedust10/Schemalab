@@ -31,6 +31,12 @@ class JoinError(UnsafeSQLError):
     """A join the database does not declare. The message lists the joins that exist."""
 
 
+class UnplacedColumnError(JoinError):
+    """A column the guard cannot place, in a query over several tables. The caller asks DuckDB
+    to bind the query: a made-up column then gets DuckDB's own error, which names the columns
+    that exist; a query that binds is refused, since its joins went unchecked."""
+
+
 def edge(table_a: str, column_a: str, table_b: str, column_b: str) -> Edge:
     a, b = (table_a.lower(), column_a.lower()), (table_b.lower(), column_b.lower())
     return (a, b) if a <= b else (b, a)
@@ -59,7 +65,7 @@ def check_joins(
         # With several, a column the guard cannot place could hide a join: refuse.
         if len(list(parsed.find_all(exp.Table))) <= 1:
             return []
-        raise JoinError(f"name each column with its table, like t.column ({e})") from None
+        raise UnplacedColumnError(f"name each column with its table, like t.column ({e})") from None
     except SqlglotError as e:
         raise JoinError(f"could not read the joins: {e}") from None
 

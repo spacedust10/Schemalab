@@ -125,8 +125,6 @@ def test_a_self_join_on_the_same_column_passes() -> None:
         "WITH k AS (SELECT LocationID AS lid FROM taxi_zones "
         "UNION ALL SELECT id FROM mi_insurance) "
         "SELECT * FROM taxi_trips t JOIN k ON t.PULocationID = k.lid",
-        # Columns qualify cannot resolve, across several tables.
-        "SELECT * FROM taxi_trips t JOIN taxi_zones z ON t.PULocationID = z.nope",
     ],
 )
 def test_joins_hidden_in_subqueries_and_unions_are_refused(sql: str) -> None:

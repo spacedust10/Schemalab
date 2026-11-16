@@ -82,3 +82,11 @@ def test_a_database_without_keys_says_its_joins_went_unchecked(sample_db: Path) 
     result = run_query(sample_db, sql, check_joins=True)
     assert result.joins_checked is False
     assert result.joins == []
+
+
+def test_a_made_up_column_in_a_join_gets_duckdbs_error(keyed_db: Path) -> None:
+    import duckdb
+
+    sql = "SELECT * FROM orders o JOIN customers c ON o.dolocationid = c.id"
+    with pytest.raises(duckdb.BinderException, match="dolocationid"):
+        run_query(keyed_db, sql, check_joins=True)

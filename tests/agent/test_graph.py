@@ -279,8 +279,8 @@ WRONG_JOIN = (
 def test_the_model_is_told_which_joins_exist(keyed_db: Path) -> None:
     gw = ScriptedGateway(PLAN, JOIN_SQL, OK)
     events = run(keyed_db, gw)
-    assert "Joins you may use (no others will run):" in gw.prompt(0)
-    assert "customers.id = orders.customer_id" in gw.prompt(0)
+    assert "only when the question needs columns from both" in gw.prompt(0)
+    assert "orders.customer_id = customers.id" in gw.prompt(0)
     provenance = events[-1]["provenance"]
     assert provenance["joins"] == ["customers.id = orders.customer_id"]
     assert provenance["joins_checked"] is True
@@ -300,4 +300,4 @@ def test_answers_on_data_without_keys_say_joins_went_unchecked(sample_db: Path) 
     gw = ScriptedGateway(PLAN, GOOD_SQL, OK)
     provenance = run(sample_db, gw)[-1]["provenance"]
     assert provenance["joins_checked"] is False
-    assert "Joins you may use" not in gw.prompt(0)
+    assert "columns from both" not in gw.prompt(0)
