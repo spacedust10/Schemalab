@@ -35,7 +35,7 @@ SUFFIXES = (".csv", ".xlsx", ".sql")
 # Key notes are built from [a-z0-9_] identifiers, so they are safe inside a SQL string.
 _NOTE_PART = r"(primary key|part of the primary key|references [a-z0-9_]+(\([a-z0-9_]+\))?)"
 _NOTE = re.compile(rf"{_NOTE_PART}(; {_NOTE_PART})*")
-_KEYS = "schemalab keys "  # a table comment that starts so holds its keys as JSON
+KEYS_COMMENT = "schemalab keys "  # a table comment that starts so holds its keys as JSON
 
 # Trusted connection, but still no extension downloads.
 _CONFIG: dict[str, str | bool | int | float | list[str]] = {
@@ -173,7 +173,7 @@ def _load_dump(con: duckdb.DuckDBPyConnection, src: Path, work: Path, taken: set
                 "not_null": table.not_null,
             }
             # Names are [a-z0-9_]; CHECK values come from the file, so quotes are doubled.
-            text = (_KEYS + json.dumps(keys)).replace("'", "''")
+            text = (KEYS_COMMENT + json.dumps(keys)).replace("'", "''")
             con.execute(f"COMMENT ON TABLE \"{renamed[table.name]}\" IS '{text}'")
     return Imported([renamed[t.name] for t in dump.tables], dict(dump.skipped))
 
@@ -339,7 +339,8 @@ def list_tables(db: Path) -> list[dict[str, Any]]:
                 "SELECT comment FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = ?",
                 [name],
             ).fetchone() or (None,)
-            keys = json.loads(comment[len(_KEYS) :]) if (comment or "").startswith(_KEYS) else None
+            stored = (comment or "").startswith(KEYS_COMMENT)
+            keys = json.loads(comment[len(KEYS_COMMENT) :]) if stored else None
             out.append({"name": name, "rows": rows, "columns": columns, "keys": keys})
     return out
 

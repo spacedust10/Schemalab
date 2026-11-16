@@ -61,6 +61,8 @@ class Dataset:
     license: str = ""
     homepage: str = ""
     tags: list[str] = field(default_factory=list)
+    # Joins the analyst may use: (table, column, table, column), within this dataset only.
+    joins: list[tuple[str, str, str, str]] = field(default_factory=list)
 
 
 def build_database(db_path: Path, datasets: list[Dataset], cache_dir: Path) -> None:
@@ -141,6 +143,10 @@ REGISTRY: dict[str, Dataset] = {
                     sha256="1a99e105092230f8620f301edcca7f80d3080642ff404d28ed957d3fa222c8ed",
                 ),
             ],
+            joins=[
+                ("taxi_trips", "PULocationID", "taxi_zones", "LocationID"),
+                ("taxi_trips", "DOLocationID", "taxi_zones", "LocationID"),
+            ],
         ),
         Dataset(
             name="michigan_insurance",
@@ -170,6 +176,22 @@ REGISTRY: dict[str, Dataset] = {
             manual_steps="Kaggle needs a login: download the archive from "
             "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce and unzip the CSVs.",
             sources=[Source(table=t, filename=f) for t, f in _OLIST_FILES.items()],
+            # ponytail: no geolocation joins. Its zip prefixes repeat, so a join on them
+            # multiplies rows; add one through a de-duplicated view if questions need places.
+            joins=[
+                ("olist_orders", "customer_id", "olist_customers", "customer_id"),
+                ("olist_order_items", "order_id", "olist_orders", "order_id"),
+                ("olist_order_items", "product_id", "olist_products", "product_id"),
+                ("olist_order_items", "seller_id", "olist_sellers", "seller_id"),
+                ("olist_order_payments", "order_id", "olist_orders", "order_id"),
+                ("olist_order_reviews", "order_id", "olist_orders", "order_id"),
+                (
+                    "olist_products",
+                    "product_category_name",
+                    "olist_category_translation",
+                    "product_category_name",
+                ),
+            ],
         ),
     ]
 }
