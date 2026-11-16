@@ -142,6 +142,13 @@ def snapshots(s: Settings, name: str) -> list[dict[str, Any]]:
         return [{"id": i, "at": _plain(at), "changes": _plain(ch)} for i, at, ch in rows]
 
 
+def newest_snapshot(s: Settings, name: str) -> int:
+    """The lake's latest snapshot: what a run just made, so the page can link the two."""
+    with connect(s, name) as con:
+        row = con.execute("SELECT max(snapshot_id) FROM lake.snapshots()").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
 def _plain(value: Any) -> Any:
     """A value JSON can carry."""
     if isinstance(value, Decimal):

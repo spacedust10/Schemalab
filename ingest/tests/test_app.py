@@ -81,7 +81,8 @@ def test_a_handed_over_file_is_loaded_then_deleted(
     (s.inbox_dir / "abc123.csv").write_text("id,n\n1,2\n")
     r = client.post(f"/lakes/{lake}/load/file", json={"file": "abc123.csv", "table": "t"})
     assert r.status_code == 200, r.text
-    assert r.json() == {"tables": {"t": 1}}
+    newest = client.get(f"/lakes/{lake}/snapshots").json()[0]["id"]
+    assert r.json() == {"tables": {"t": 1}, "snapshot": newest}
     assert not (s.inbox_dir / "abc123.csv").exists()
     [table] = client.get(f"/lakes/{lake}/tables").json()
     assert (table["layer"], table["name"], table["rows"]) == ("bronze", "t", 1)
@@ -95,7 +96,8 @@ def test_models_snapshots_and_previews(client: TestClient, s: Settings, lake: st
         {"layer": "silver", "name": "t", "sql": "SELECT id, n * 2 AS n2 FROM bronze_t"}
     ]
     r = client.post(f"/lakes/{lake}/transform", json={"models": models})
-    assert r.json() == {"tables": {"silver.t": 2}}
+    assert r.json()["tables"] == {"silver.t": 2}
+    assert r.json()["snapshot"] == client.get(f"/lakes/{lake}/snapshots").json()[0]["id"]
     bad = client.post(f"/lakes/{lake}/transform", json={"models": [{**models[0], "sql": "x"}]})
     assert bad.status_code == 400
     assert bad.json()["detail"].startswith("silver.t:")

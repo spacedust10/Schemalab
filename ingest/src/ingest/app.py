@@ -78,6 +78,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     Lake = Annotated[str, Depends(lake_name)]
 
+    def made(name: str, tables: dict[str, int]) -> dict[str, Any]:
+        """A run's answer: rows per table, and the snapshot it left the lake at."""
+        return {"tables": tables, "snapshot": lk.newest_snapshot(s, name)}
+
     @app.exception_handler(lk.LakeError)
     @app.exception_handler(sources.SourceError)
     def refused(_: Request, e: Exception) -> JSONResponse:
@@ -94,7 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = s.inbox_dir / body.file
         try:
             with busy(name):
-                return {"tables": lk.load_file(s, name, path, body.table)}
+                return made(name, lk.load_file(s, name, path, body.table))
         finally:
             path.unlink(missing_ok=True)
 
@@ -103,7 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         url = sources.sheet_export_url(body.url)
         with busy(name):
             csv = sources.download(url, sources.sheet_host)
-            return {"tables": lk.load_sheet(s, name, csv, body.table)}
+            return made(name, lk.load_sheet(s, name, csv, body.table))
 
     @lakes.post("/load/quakes")
     def load_quakes(name: Lake) -> dict[str, Any]:
@@ -112,12 +116,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return feed
 
         with busy(name):
-            return {"tables": lk.load_quakes(s, name, fetch)}
+            return made(name, lk.load_quakes(s, name, fetch))
 
     @lakes.post("/transform")
     def transform(name: Lake, body: Transform) -> dict[str, Any]:
         with busy(name):
-            return {"tables": lk.transform(s, name, [m.model_dump() for m in body.models])}
+            return made(name, lk.transform(s, name, [m.model_dump() for m in body.models]))
 
     @lakes.get("/tables")
     def tables(name: Lake) -> list[dict[str, Any]]:
