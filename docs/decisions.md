@@ -28,3 +28,5 @@ Technical choices and why they were made. When a decision changes, add a new row
 | 2026-11-15 | Lake secrets have no defaults in Compose | `scripts/lake-env.sh` writes random ones to `.env`; a committed default would be a working key |
 | 2026-11-15 | Ingest reaches the internet only through a Squid proxy that allows HTTPS CONNECT to the USGS and Google Sheets hosts | The code's fixed hosts are one wall; the network is a second, against a bug or a compromised dependency. Ingest sits on internal networks only, and dlt's telemetry is off |
 | _open_ | MetricFlow or Cube for the semantic layer | Decide when the data platform is built |
+| 2026-11-15 | Neither, for now: a declared join graph that the guard checks every analyst query against | MetricFlow needs a dbt project, Cube a Node service, and the Ibis-based options do not run on DuckDB 2.0 yet. Wrong joins were the eval's worst failures, and a graph from upload keys and the sample registry stops them with no new service |
+| 2026-11-15 | Joins go unchecked, and answers say so, when the data declares no keys | Guessing keys from column names would certify the very joins the guard exists to stop |
