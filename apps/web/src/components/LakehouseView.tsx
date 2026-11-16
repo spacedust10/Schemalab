@@ -34,12 +34,18 @@ export function LakehouseView() {
     load().catch(() => setError("Could not reach the server."));
   }, [load]);
 
-  // Check back while a run is going; stop once none is.
+  // Check back while a run is going; stop once none is. `tries` re-arms the timer after a
+  // check that failed, which leaves `data` unchanged.
+  const [tries, setTries] = useState(0);
   useEffect(() => {
     if (!data || !busy(data.runs)) return;
-    const timer = setTimeout(() => void load(), 2000);
+    const timer = setTimeout(() => {
+      load()
+        .catch(() => setError("Could not reach the server. Still checking…"))
+        .finally(() => setTries((n) => n + 1));
+    }, 2000);
     return () => clearTimeout(timer);
-  }, [data, load]);
+  }, [data, tries, load]);
 
   async function send(path: string, init: RequestInit): Promise<boolean> {
     setError(null);
@@ -101,6 +107,11 @@ export function LakehouseView() {
       </header>
 
       {error && <p className="alert" role="alert"><strong>Error</strong>{error}</p>}
+      {!data.available && (
+        <p className="alert" role="status">
+          The lakehouse service is not answering, so tables and snapshots are hidden. Your runs and models are below.
+        </p>
+      )}
 
       <section aria-labelledby="lake-load">
         <h2 id="lake-load">Load into bronze</h2>

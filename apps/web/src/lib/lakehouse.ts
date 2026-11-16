@@ -15,7 +15,7 @@ export type Run = {
 };
 export type Snapshot = { id: number; at: string; changes: Record<string, string[]> };
 export type Model = { layer: "silver" | "gold"; name: string; sql: string };
-export type Overview = { tables: LakeTable[]; snapshots: Snapshot[]; runs: Run[]; models: Model[] };
+export type Overview = { tables: LakeTable[]; snapshots: Snapshot[]; runs: Run[]; models: Model[]; available: boolean };
 export type Preview = { columns: string[]; rows: unknown[][]; total: number };
 
 const TABLE = /^[a-z_][a-z0-9_]{0,62}$/;
