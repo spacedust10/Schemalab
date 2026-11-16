@@ -7,6 +7,7 @@ CSV uploads and the lakehouse declare no keys, so their graph is empty and joins
 """
 
 import json
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -67,3 +68,11 @@ def describe_joins(graph: set[Edge]) -> str:
     return "Joins you may use (no others will run):\n" + "\n".join(
         f"  {text(e)}" for e in sorted(graph)
     )
+
+
+def joins_block(db_path: Path) -> str:
+    """The allowed-joins block for the analyst's schema prompt."""
+    from schemalab.guards.engine import open_readonly
+
+    with open_readonly(db_path) as con:
+        return describe_joins(join_graph(con))

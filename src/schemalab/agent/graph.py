@@ -28,6 +28,7 @@ from schemalab.agent.schema import describe_schema
 from schemalab.guards.engine import open_readonly
 from schemalab.guards.run import QueryResult, QueryTimeoutError, run_query
 from schemalab.guards.sql import UnsafeSQLError
+from schemalab.joingraph import joins_block
 from schemalab.llm import AllModelsFailedError, Completion, Gateway
 
 MAX_ATTEMPTS = 3
@@ -102,7 +103,10 @@ def _build(
 
     def schema(state: State) -> State:
         text = describe_schema(db_path, categories=categories)
-        get_stream_writer()({"step": "schema", "tables": text.count(" rows)")})
+        tables = text.count(" rows)")
+        if joins := joins_block(db_path):
+            text += "\n\n" + joins
+        get_stream_writer()({"step": "schema", "tables": tables})
         return {"schema": text}
 
     def plan(state: State) -> State:
@@ -144,7 +148,7 @@ def _build(
         attempt, sql = state["attempt"], state["sql"]
         stage: Literal["guard", "run"]
         try:
-            result = run_query(db_path, sql)
+            result = run_query(db_path, sql, check_joins=True)
         except UnsafeSQLError as e:
             stage, message = "guard", str(e)
         except (QueryTimeoutError, duckdb.Error) as e:
@@ -254,6 +258,8 @@ def _build(
                     "models": models_used,
                     "results_shared_with_model": share_results,
                     "categories_shared_with_model": categories,
+                    "joins": result.joins,
+                    "joins_checked": result.joins_checked,
                 },
             }
         )
