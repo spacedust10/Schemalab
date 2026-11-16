@@ -49,7 +49,14 @@ def run_query(
             try:
                 joins = joins_allowed(safe_sql, schema_of(con), graph)
             except UnplacedColumnError:
-                con.execute(f"EXPLAIN {safe_sql}")  # a made-up column: DuckDB says which
+                # A made-up column: DuckDB's binder says which. EXPLAIN only plans, and it
+                # gets the same time limit as the query.
+                timer = threading.Timer(timeout_s, con.interrupt)
+                timer.start()
+                try:
+                    con.execute(f"EXPLAIN {safe_sql}")
+                finally:
+                    timer.cancel()
                 raise
 
         timer = threading.Timer(timeout_s, con.interrupt)
