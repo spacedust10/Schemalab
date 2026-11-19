@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET, POST, PUT } from "../app/api/lakehouse/[[...path]]/route";
 import { SESSION_COOKIE } from "./api";
-import { busy, changeLine, type Run, runLine, upstreamPath } from "./lakehouse";
+import { busy, changeLine, columnList, type Run, runLine, upstreamPath } from "./lakehouse";
 
 const q = (s = "") => new URLSearchParams(s);
 
@@ -143,5 +143,13 @@ describe("the preview in the URL", () => {
       expect(previewFromQuery(new URLSearchParams(bad))).toBeNull();
     }
     expect(previewFromQuery(new URLSearchParams("table=gold.x&as_of=abc"))).toEqual({ layer: "gold", name: "x", version: "" });
+  });
+});
+
+describe("check columns typed as a comma list", () => {
+  it("keeps what is being typed and drops empty entries only when sent", () => {
+    for (const typed of ["id, ", "id,", "id, amount", " id"]) expect(columnList.show(columnList.parse(typed))).toBe(typed);
+    expect(columnList.parse("")).toEqual([]);
+    expect(columnList.clean([" ", "id", "", "amount"])).toEqual(["id", "amount"]);
   });
 });

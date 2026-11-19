@@ -1,9 +1,14 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { busy, changeLine, LAYERS, type Layer, type Model, numericColumns, type Open, type Overview, type Preview, previewFromQuery, previewQuery, type Run, runLine, snapshotLabel } from "@/lib/lakehouse";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { busy, changeLine, columnList, LAYERS, type Layer, type Model, numericColumns, type Open, type Overview, type Preview, previewFromQuery, previewQuery, type Run, runLine, snapshotLabel } from "@/lib/lakehouse";
 import { errorText } from "@/lib/post";
+
+const CHECKS = [
+  ["not_null", "Never empty"],
+  ["unique", "Unique"],
+] as const;
 
 const LAYER_NOTE: Record<Layer, string> = {
   bronze: "Raw, as loaded. Nothing here yet: load a file, the earthquake feed or a sheet.",
@@ -83,7 +88,8 @@ export function LakehouseView() {
 
   async function saveModels(run: boolean) {
     if (!models) return;
-    if (!(await send("models", json("PUT", { models })))) return;
+    const clean = models.map((m) => ({ ...m, not_null: columnList.clean(m.not_null), unique: columnList.clean(m.unique) }));
+    if (!(await send("models", json("PUT", { models: clean })))) return;
     if (run) await send("transform", json("POST", {}));
   }
 
@@ -201,7 +207,8 @@ export function LakehouseView() {
         <h2 id="lake-models">Silver and gold models</h2>
         <p>
           Each model is one SELECT that becomes a table. Read bronze and silver tables by their layer and name, like
-          bronze_orders. Silver models run first, then gold, all in one snapshot: if one fails, nothing changes.
+          bronze_orders, or silver_ and the name of a silver model. Each model runs after the silver models it reads, in any
+          order you list them, all in one snapshot: if one fails, nothing changes.
         </p>
         {draft.length === 0 && bronze.length > 0 && (
           <button
@@ -229,6 +236,13 @@ export function LakehouseView() {
             <input id={`m-name-${i}`} value={m.name} maxLength={63} pattern="[a-z_][a-z0-9_]*" autoComplete="off" onChange={(e) => setModels(draft.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
             <label htmlFor={`m-sql-${i}`}>SELECT</label>
             <textarea id={`m-sql-${i}`} className="sql" rows={4} maxLength={5000} spellCheck={false} value={m.sql} onChange={(e) => setModels(draft.map((x, j) => (j === i ? { ...x, sql: e.target.value } : x)))} />
+            {CHECKS.map(([key, label]) => (
+              <Fragment key={key}>
+                <label htmlFor={`m-${key}-${i}`}>{label}</label>
+                <input id={`m-${key}-${i}`} aria-describedby={`m-checks-${i}`} value={columnList.show(m[key])} pattern="\s*[a-z_][a-z0-9_]*(\s*,\s*[a-z_][a-z0-9_]*)*\s*,?\s*" autoComplete="off" spellCheck={false} onChange={(e) => setModels(draft.map((x, j) => (j === i ? { ...x, [key]: columnList.parse(e.target.value) } : x)))} />
+              </Fragment>
+            ))}
+            <p id={`m-checks-${i}`} className="hint">Column names separated by commas, like order_id, amount. If a check fails, the run stops and nothing is published.</p>
             <button type="button" className="button quiet" onClick={() => setModels(draft.filter((_, j) => j !== i))}>Remove model {i + 1}</button>
           </fieldset>
         ))}

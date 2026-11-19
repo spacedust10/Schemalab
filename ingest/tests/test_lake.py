@@ -120,6 +120,42 @@ def test_a_failing_model_changes_nothing(s: Settings, name: str, tmp_path: Path)
     assert [t["layer"] for t in lk.tables(s, name)] == ["bronze"]
 
 
+def test_passing_checks_let_the_run_through(s: Settings, name: str, tmp_path: Path) -> None:
+    lk.load_file(s, name, csv(tmp_path, ORDERS), "orders")
+    # Unique ignores NULLs, as dbt's unique test does: two orders with no coupon are fine.
+    sql = "SELECT *, NULL AS coupon FROM bronze_orders WHERE status = 'paid'"
+    model = {**MODELS[0], "sql": sql}
+    checked = [{**model, "not_null": ["id", "amount"], "unique": ["id", "coupon"]}, MODELS[1]]
+    assert lk.transform(s, name, checked) == {"silver.orders": 2, "gold.revenue": 1}
+
+
+@pytest.mark.parametrize(
+    ("checks", "why"),
+    [
+        (
+            {"unique": ["status"]},
+            r"^silver\.orders: 1 value of status appears more than once, "
+            r"but status must be unique$",
+        ),
+        (
+            {"not_null": ["note"]},
+            r"^silver\.orders: 2 rows have no note, but note must never be empty$",
+        ),
+        ({"unique": ["missing"]}, r"^silver\.orders: there is no column missing to check$"),
+    ],
+)
+def test_a_failing_check_publishes_nothing(
+    s: Settings, name: str, tmp_path: Path, checks: dict[str, list[str]], why: str
+) -> None:
+    lk.load_file(s, name, csv(tmp_path, ORDERS), "orders")
+    model = {**MODELS[0], "sql": "SELECT *, NULL AS note FROM bronze_orders WHERE status = 'paid'"}
+    before = len(lk.snapshots(s, name))
+    with pytest.raises(lk.LakeError, match=why):
+        lk.transform(s, name, [{**model, **checks}, MODELS[1]])
+    assert len(lk.snapshots(s, name)) == before
+    assert [t["layer"] for t in lk.tables(s, name)] == ["bronze"]
+
+
 @pytest.mark.parametrize(
     "sql",
     [

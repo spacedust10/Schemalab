@@ -231,6 +231,7 @@ GOOD = [
     {"layer": "gold", "name": "total", "sql": "SELECT count(*) AS n FROM silver_paid"},
     {"layer": "silver", "name": "paid", "sql": "SELECT id FROM bronze_orders"},
 ]
+SAVED = [{**m, "not_null": [], "unique": []} for m in GOOD]  # as stored: no checks
 
 
 def test_models_are_saved_and_listed(client: TestClient, ingest: FakeIngest) -> None:
@@ -238,7 +239,7 @@ def test_models_are_saved_and_listed(client: TestClient, ingest: FakeIngest) -> 
     assert (
         client.put("/lakehouse/models", json={"models": GOOD}, headers=headers).status_code == 200
     )
-    assert client.get("/lakehouse", headers=headers).json()["models"] == GOOD
+    assert client.get("/lakehouse", headers=headers).json()["models"] == SAVED
     assert client.get("/lakehouse", headers=register(client, "b@umich.edu")).json()["models"] == []
 
 
@@ -266,6 +267,28 @@ def test_a_transform_runs_silver_before_gold_with_checked_sql(
     [(_, lake, models)] = ingest.calls
     assert lake == "u1"
     assert [(m["layer"], m["name"]) for m in models] == [("silver", "paid"), ("gold", "total")]
+
+
+def test_a_models_quality_checks_are_saved_and_sent_to_ingest(
+    client: TestClient, ingest: FakeIngest
+) -> None:
+    headers = register(client)
+    checked = [{**GOOD[1], "not_null": ["id"], "unique": ["id"]}, GOOD[0]]
+    client.put("/lakehouse/models", json={"models": checked}, headers=headers)
+    assert client.get("/lakehouse", headers=headers).json()["models"][0]["unique"] == ["id"]
+    client.post("/lakehouse/transform", headers=headers)
+    [(_, _, models)] = ingest.calls
+    assert (models[0]["not_null"], models[0]["unique"]) == (["id"], ["id"])
+    assert (models[1]["not_null"], models[1]["unique"]) == ([], [])
+
+
+@pytest.mark.parametrize("column", ['id" OR 1=1 --', "Id", ""])
+def test_a_check_on_a_badly_named_column_is_refused(
+    client: TestClient, ingest: FakeIngest, column: str
+) -> None:
+    model = {**GOOD[1], "unique": [column]}
+    resp = client.put("/lakehouse/models", json={"models": [model]}, headers=register(client))
+    assert resp.status_code == 422
 
 
 @pytest.mark.parametrize(
@@ -370,7 +393,7 @@ def test_runs_and_models_still_show_when_ingest_is_down(
     body = client.get("/lakehouse", headers=headers).json()
     assert body["available"] is False
     assert body["tables"] == [] and body["snapshots"] == []
-    assert len(body["runs"]) == 1 and body["models"] == GOOD
+    assert len(body["runs"]) == 1 and body["models"] == SAVED
 
 
 def test_handed_files_are_removed_if_the_run_cannot_be_recorded(

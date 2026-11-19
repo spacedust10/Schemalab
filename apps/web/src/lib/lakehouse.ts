@@ -15,7 +15,15 @@ export type Run = {
   snapshot: number | null; // the lake version the run left behind
 };
 export type Snapshot = { id: number; at: string; changes: Record<string, string[]> };
-export type Model = { layer: "silver" | "gold"; name: string; sql: string };
+// not_null and unique: data quality checks; a failing one stops the run and publishes nothing.
+export type Model = { layer: "silver" | "gold"; name: string; sql: string; not_null?: string[]; unique?: string[] };
+
+// A column list typed as "id, amount": kept as typed while editing, cleaned when sent.
+export const columnList = {
+  parse: (text: string): string[] => (text === "" ? [] : text.split(",")),
+  show: (columns: string[] = []): string => columns.join(","),
+  clean: (columns: string[] = []): string[] => columns.map((s) => s.trim()).filter(Boolean),
+};
 export type Overview = { tables: LakeTable[]; snapshots: Snapshot[]; runs: Run[]; models: Model[]; available: boolean };
 export type Preview = { columns: string[]; rows: unknown[][]; total: number };
 

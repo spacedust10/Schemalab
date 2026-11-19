@@ -90,11 +90,11 @@ def _check_tables(tree: exp.Expression, allowed_tables: Collection[str]) -> None
         if table.args.get("db") or table.args.get("catalog"):
             raise UnsafeSQLError(f"qualified table names are not allowed: {table.sql('duckdb')}")
         name = table.name.lower()
-        if name not in allowed and name not in _visible_ctes(table):
+        if name not in allowed and name not in visible_ctes(table):
             raise UnsafeSQLError(f"unknown table: {table.name}")
 
 
-def _visible_ctes(node: exp.Expression) -> set[str]:
+def visible_ctes(node: exp.Expression) -> set[str]:
     """CTE names in scope at `node`, following SQL's scoping rules.
 
     - A CTE is visible inside the query that owns its WITH, including nested subqueries,

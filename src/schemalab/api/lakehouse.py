@@ -22,6 +22,7 @@ from schemalab.api.auth import EngineDep, UserDep
 from schemalab.config import get_settings
 from schemalab.lakehouse import (
     LAYERS,
+    MAX_CHECKS,
     MAX_MODELS,
     MAX_SQL,
     TABLE,
@@ -281,10 +282,16 @@ def load_sheet(
     )
 
 
+Identifier = Annotated[str, StringConstraints(pattern=f"^{TABLE.pattern}$")]
+
+
 class ModelBody(BaseModel):
     layer: Literal["silver", "gold"]
-    name: Annotated[str, StringConstraints(pattern=f"^{TABLE.pattern}$")]
+    name: Identifier
     sql: Annotated[str, StringConstraints(min_length=1, max_length=MAX_SQL)]
+    # Data quality checks: ingest refuses the whole run if one fails.
+    not_null: Annotated[list[Identifier], Field(max_length=MAX_CHECKS)] = []
+    unique: Annotated[list[Identifier], Field(max_length=MAX_CHECKS)] = []
 
 
 class ModelsBody(BaseModel):

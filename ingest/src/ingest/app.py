@@ -51,6 +51,8 @@ class Model(BaseModel):
     layer: str
     name: str
     sql: str
+    not_null: list[str] = []  # columns checked by lake.transform before the run commits
+    unique: list[str] = []
 
 
 class Transform(BaseModel):

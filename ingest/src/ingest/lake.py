@@ -285,11 +285,40 @@ def _check_model(sql: str, allowed: set[str]) -> None:
             raise LakeError(f"Models cannot call {n['function_name']}.")
 
 
-def transform(s: Settings, name: str, models: list[dict[str, str]]) -> dict[str, int]:
+def _gate(con: duckdb.DuckDBPyConnection, target: str, m: dict[str, Any]) -> None:
+    """The model's data quality checks on the table it just built, inside the run's transaction.
+
+    A failure raises, the run rolls back, and no snapshot is made. ponytail: single-column
+    unique and a full scan per check; composite keys or sampling when a model needs them.
+    """
+    table = f"lake.{target}"
+    try:
+        empty = con.execute(f"SELECT * FROM {table} LIMIT 0")  # noqa: S608 (checked names)
+        have = {d[0].lower() for d in empty.description}
+        for c in [*m.get("not_null", []), *m.get("unique", [])]:
+            if c not in have:
+                raise LakeError(f"{target}: there is no column {c} to check")
+        for c in m.get("not_null", []):
+            if n := _count(con, f'{table} WHERE "{c}" IS NULL'):
+                rows = "1 row has" if n == 1 else f"{n} rows have"
+                raise LakeError(f"{target}: {rows} no {c}, but {c} must never be empty")
+        for c in m.get("unique", []):
+            # NULL is no value, so it never repeats (as in dbt's unique test).
+            dupes = f'(SELECT 1 FROM {table} WHERE "{c}" IS NOT NULL GROUP BY "{c}" HAVING count(*) > 1)'  # noqa: S608, E501 (checked names)
+            if n := _count(con, dupes):
+                values = f"1 value of {c} appears" if n == 1 else f"{n} values of {c} appear"
+                raise LakeError(f"{target}: {values} more than once, but {c} must be unique")
+    except duckdb.Error as e:
+        raise LakeError(f"{target}: {_cause(e)}") from e
+
+
+def transform(s: Settings, name: str, models: list[dict[str, Any]]) -> dict[str, int]:
     """Runs every model in order in one transaction: one snapshot, or nothing on failure."""
     for m in models:
         if m["layer"] not in ("silver", "gold") or not TABLE.fullmatch(m["name"]):
             raise LakeError("A model needs a silver or gold layer and a lowercase table name.")
+        if not all(TABLE.fullmatch(c) for c in [*m.get("not_null", []), *m.get("unique", [])]):
+            raise LakeError("Name check columns in lowercase, like order_id.")
     counts: dict[str, int] = {}
     with connect(s, name) as con:
         allowed: set[str] = set()
@@ -313,6 +342,7 @@ def transform(s: Settings, name: str, models: list[dict[str, str]]) -> dict[str,
                     )
                     allowed.add(f"silver_{m['name']}")
                 counts[target] = _count(con, f"lake.{target}")
+                _gate(con, target, m)
             con.execute("COMMIT")
         except BaseException:
             con.execute("ROLLBACK")

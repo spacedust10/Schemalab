@@ -427,13 +427,13 @@ def _run_result(stored: Any) -> dict[str, Any]:
     return {"result": stored, "snapshot": None}
 
 
-def get_lake_models(conn: Connection, user_id: int) -> list[dict[str, str]]:
+def get_lake_models(conn: Connection, user_id: int) -> list[dict[str, Any]]:
     row = conn.execute(
         select(lake_models.c.models).where(lake_models.c.user_id == user_id)
     ).one_or_none()
     return list(row.models) if row else []
 
 
-def set_lake_models(conn: Connection, user_id: int, models: list[dict[str, str]]) -> None:
+def set_lake_models(conn: Connection, user_id: int, models: list[dict[str, Any]]) -> None:
     conn.execute(delete(lake_models).where(lake_models.c.user_id == user_id))
     conn.execute(insert(lake_models).values(user_id=user_id, models=models))
