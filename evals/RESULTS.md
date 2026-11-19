@@ -68,3 +68,33 @@ Labels stay informative: high was right 91% of the time (35 answers), low 50% (1
 
 Next to try: list values only for the tables a question is likely to need, which should keep
 the insurance gains without lengthening every taxi prompt.
+
+## 2026-11-18: join guard (#50)
+
+Same model and questions, critic as judge, category values on. "Before" is the commit just
+before the guard (567c2fd); "after" checks every join against the declared join graph and tells
+the retry which joins exist.
+
+| Agent version | Accuracy | Taxi (36) | Insurance (18) | Seconds per question |
+|---|---|---|---|---|
+| Before | 75.9% (41) | 28 | 13 | 12.3 |
+| **Join guard (now)** | **81.5% (44)** | **30** | **14** | 15.3 |
+
+What the guard did on the questions that used to join wrongly (m03, m04, m06, m07, m08, m17,
+t35): no answer in either run joins the insurance table to taxi tables any more (category
+values had already stopped most of them). m03 is now right. m07 was right before only by luck:
+it joined insurance to taxi zones on a constant, which happened not to change the average. The
+guard refuses that join, and the retries did not find a query without it, so m07 now ends with
+no answer instead of a lucky one. m17 and t35 still fail for other reasons (a wrong subquery
+column; DuckDB numbering days from Sunday).
+
+All six queries that ended without an answer were replayed through the guard, and every refusal
+was right: two wrong joins (t07 joins insurance to taxi trips on `variable = payment_type`, and
+m07 above), one unaliased second join of `taxi_zones` (t02), and three queries naming columns
+that do not exist (t24, t36, m17). Errors rose from 1 to 6: an answer the guard cannot check
+now ends as an error rather than as a confident wrong number.
+
+The other flips (m01, t21, t22, t27, t28, t32 right; t24, t36 wrong) involve no wrong join; t22
+has no join at all. They are llama3.1 varying between runs. The guard's own effect on accuracy is
+about zero (m03 gained, m07 lost); what it buys is that a wrong join can no longer produce an
+answer. One seed each.
